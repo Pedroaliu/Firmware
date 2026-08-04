@@ -1,197 +1,161 @@
-# ArchFW Platform Unification Principle v0.1
+# ArchFW Platform Unification Principle v0.2
 
-## Vision
+ArchFW is a cloud-platform firmware OS rather than a large BIOS replacement.
 
-ArchFW is a Cloud Platform Firmware OS, not a traditional BIOS replacement.
+Canonical architecture: [ArchFW Microkernel and Firmware Architecture v0.2](ARCHFW_MICROKERNEL_FIRMWARE_ARCHITECTURE_V0.2.md).
 
-The goal is to provide one unified platform control plane for heterogeneous SoCs:
+## Core principle
 
-- CPU
-- Memory
-- PCIe
-- CXL
-- GPU
-- NPU
-- DPU
-- Security engines
-- Power and management controllers
+> Different IP firmware, one platform language; one physical writer, explicit ownership, isolated execution.
 
-IP implementations may differ, but platform contracts must be unified.
+The platform language consists of:
 
-## Core Principle
+- stable Target IDs and typed attributes;
+- explicit topology and dependency relationships;
+- lifecycle, configuration, diagnosis and workload ownership;
+- versioned Agent transactions;
+- restartable isteps;
+- structured FFDC and RAS evidence;
+- a final OS-published topology.
 
-> Different IP firmware, one platform language.
+## Architecture boundary
 
-Every hardware agent must expose:
-
-- Configuration contract
-- Capability model
-- Lifecycle model
-- RAS interface
-- Debug interface
-- Ownership model
-
-## Architecture
-
-```
-Linux / Hypervisor
+```text
+ArchFW microkernel
+  TCB / CSpace / VSpace / Frame
+  Endpoint / Reply / Notification / IRQ
+  Untyped/retype and fault IPC
         |
-        | ArchFW API
+        v
+Root Orchestrator and isolated services
+  Targeting / PlatformGraph
+  IStep engine
+  Supervisor
+  Trace / FFDC
+  RAS Broker
+  Hardware services
         |
-ArchFW Microkernel
+        v
+Remote Agents
+  SBE / SCP / Memory / PCIe / RAS / BMC
         |
-+----------------------------+
-| Platform Services          |
-|                            |
-| PlatformGraph / Targeting  |
-| Step Engine                |
-| RAS Engine                 |
-| Settings Service           |
-| Debug Plane                |
-+----------------------------+
-        |
-+----------------------------+
-| Hardware Agents            |
-|                            |
-| SBE  SCP  OCC  GPU  DPU    |
-| CXL  PCIe  Memory Agents   |
-+----------------------------+
+        v
+EDK II -> EFI memory map + ACPI -> Linux/hypervisor
 ```
 
-## Platform Model
+The microkernel contains no platform configuration policy, hardware drivers, istep tables, ACPI builder or diagnosis rules.
 
-Use a unified PlatformGraph inspired by IBM Hostboot Targeting.
+## Three platform views
 
-The graph describes:
+### Static PlatformGraph
 
-- targets
-- relationships
-- attributes
-- runtime state
-- ownership
-- health
+Compiled immutable facts:
 
-All firmware components, RAS, debug and configuration are based on this model.
+- targets and physical hierarchy;
+- MMIO and IRQ resources;
+- power/clock/reset dependencies;
+- coherent, PCIe, CXL and memory topology;
+- security and RAS containment domains;
+- Agent attachment and hardware capabilities.
 
-## Configuration
+### Runtime State Overlay
 
-Single source of truth:
+Boot and runtime state:
 
+```text
+PRESENT / FUNCTIONAL / INITIALIZED / POWERED
+DEGRADED / QUARANTINED / DECONFIGURED
+OWNER / OWNER_EPOCH
+LAST_ERROR / LAST_SUCCESSFUL_STEP
 ```
-CUE Platform Model
+
+### Published OS View
+
+Only safe, available resources:
+
+- enabled harts;
+- usable memory;
+- NUMA/cache topology;
+- enabled PCIe/CXL roots and devices;
+- interrupt and IOMMU relationships;
+- RAS interfaces.
+
+EFI memory maps and ACPI tables are generated from the Published OS View. They do not independently rediscover hardware.
+
+## Configuration flow
+
+CUE is the human-maintained source language. Early firmware does not parse CUE.
+
+```text
+CUE platform source
         |
         v
 fwcfg compiler
         |
-+----------------+
-| PlatformGraph  |
-| Agent Manifest |
-| ACPI / DT      |
-| BMC inventory  |
-| Simulator model|
-+----------------+
+        +-- Platform IR
+        +-- generated Target IDs and typed attributes
+        +-- Agent manifests
+        +-- simulator model
+        +-- ACPI-builder inputs
 ```
 
-Configuration layers:
+Configuration layers remain:
 
-```
-Silicon
-  |
-Board
-  |
-Project
-  |
-Policy
-  |
-Runtime Override
+```text
+silicon -> board -> product -> policy -> validated runtime override
 ```
 
-## Microkernel Role
+A runtime override may change policy or desired state but cannot invent physical resources absent from the compiled graph.
 
-The microkernel provides:
+## Ownership model
 
-- scheduling
-- IPC
-- memory isolation
-- capability management
-- interrupt handling
-- service supervision
-- debug control
+A Target declares four roles:
 
-Reference ideas:
+- Lifecycle Owner: power, clock, reset and lifecycle transitions;
+- Configuration Owner: register programming and HWP execution;
+- Diagnosis Owner: evidence analysis, root cause and action planning;
+- Workload Owner: OS, hypervisor or accelerator runtime using the resource.
 
-- seL4: capability and isolation
-- QNX: service model
-- Zircon: handles and channels
-- Hostboot: firmware OS concept
+A physical control register has one writable owner at a time. Other components use an Endpoint/Agent request or receive read-only evidence.
 
-## Device Model
+Kernel capabilities enforce actual access. Platform ownership leases enforce the current lifecycle policy. Destructive operations require both.
 
-ArchFW should provide its own device service framework.
+## Hardware services
 
-Platform-specific drivers:
+Platform-specific hardware support runs in isolated services or remote Agents:
 
-- DDR controller
-- PCIe root complex
-- IOMMU
-- CXL controller
-- power/clock/reset
+- core/cache;
+- DDR and memory-controller;
+- power/clock/reset;
+- interrupt routing;
+- PCIe/CXL;
+- IOMMU;
+- security.
 
-Standard device services:
+QEMU fake hardware follows the same service and Agent contracts. Test-only direct function calls do not define the production architecture.
 
-- NVMe
-- Ethernet
-- USB
-- GPU interface
-- Storage devices
+## RAS boundary
 
-Drivers should run as isolated services, not directly inside the kernel.
-
-## RAS Fabric
-
-All IP errors are converted into a unified event model.
-
-```
-Hardware IP
-    |
-RAS Adapter
-    |
-RAS Fabric
-    |
-RAS Case Engine
+```text
+hardware containment
+  -> local immutable evidence snapshot
+  -> independent RAS Processor
+  -> action manifest
+  -> HostFW RAS Broker
+  -> Target overlay and istep reconfiguration
+  -> Linux/hypervisor recovery
 ```
 
-Unified RAS covers:
+HostFW does not duplicate the complete platform diagnosis engine when the independent RAS domain exists.
 
-- CPU MCA-like errors
-- Memory ECC
-- PCIe AER
-- CXL poison
-- GPU/NPU/DPU failures
+## Simulator integration
 
-## Debug Plane
+ArchLab RVSoC-Sim can consume the same generated Platform IR and Agent contracts to model:
 
-Firmware must provide modern observability:
-
-- tracing
-- crash dump
-- memory corruption detection
-- fault injection
-- checkpoint/replay
-- live debug
-- probe framework
-
-## RVSoC-Sim Integration
-
-RVSoC-Sim-v2 should execute ArchFW models with:
-
-- CPU
-- cache
-- memory
-- PCIe
-- CXL
-- agents
-- RAS events
-- debug framework
-
-The simulator is not only hardware simulation, but firmware-in-the-loop platform simulation.
+- topology and resource ownership;
+- CPU/cache/memory/NoC;
+- PCIe/CXL/IOMMU;
+- power/clock/reset;
+- Agent latency, reset and stale completion;
+- RAS containment and evidence;
+- firmware-in-the-loop boot and reconfiguration.
