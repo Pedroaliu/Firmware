@@ -1,22 +1,22 @@
-# ArchFW Distributed RAS Design v0.1
+# ArchFW Distributed RAS Design v0.1 — Superseded
 
-## Philosophy
+This document is retained as design history.
 
-Future cloud servers are heterogeneous:
+The production ownership model changed in v0.2: complete platform root-cause diagnosis belongs to an independent RAS Processor when that domain exists; HostFW validates its action manifest, updates Target state and drives istep reconfiguration. HostFW no longer owns a duplicate full RAS Case Engine.
 
-- CPU
-- GPU
-- NPU
-- DPU
-- CXL memory
-- PCIe devices
-- management processors
+Use:
 
-RAS cannot depend on one firmware domain.
+- [ArchFW Distributed RAS Design v0.2](ARCHFW_DISTRIBUTED_RAS_DESIGN_V0.2.md)
+- [ArchFW Microkernel and Firmware Architecture v0.2](ARCHFW_MICROKERNEL_FIRMWARE_ARCHITECTURE_V0.2.md)
+- [ArchFW RISC-V RAS Architecture v0.2](ARCHFW_RISCV_RAS_ARCHITECTURE_V0.2.md)
 
-## RAS Layers
+---
 
-```
+## Historical v0.1 model
+
+The original model proposed:
+
+```text
 Hardware autonomous RAS
         |
 Local Agent
@@ -30,92 +30,15 @@ Hypervisor recovery
 BMC/Fleet service
 ```
 
-## Responsibilities
+Useful ideas retained in v0.2:
 
-### Local Agent
+- local detection and smallest-domain containment;
+- structured evidence and boot-epoch identity;
+- an always-on broker/journal;
+- topology-aware diagnosis;
+- workload recovery in the hypervisor/OS;
+- persistent service action and fleet correlation;
+- avoiding SMI-style global stop for contained errors;
+- simulator fault injection, delayed completion and stale-event filtering.
 
-Examples:
-
-- SBE
-- SCP
-- GPU firmware
-- DPU firmware
-- CXL controller firmware
-
-Responsibilities:
-
-- detect local failure
-- contain quickly
-- collect evidence
-- report event
-
-### RAS Broker
-
-Always-on domain:
-
-- event routing
-- journal
-- boot epoch tracking
-- host-dead evidence capture
-- escalation
-
-### HostFW RAS Engine
-
-Responsibilities:
-
-- topology diagnosis
-- root cause analysis
-- deconfiguration
-- recovery decision
-
-Inspired by Hostboot PRDF/HWAS.
-
-### Hypervisor
-
-Responsible for:
-
-- VM impact
-- tenant isolation
-- workload recovery
-
-### BMC
-
-Responsible for:
-
-- persistent storage
-- service action
-- fleet correlation
-
-## RAS Event
-
-Events contain:
-
-- source agent
-- boot epoch
-- target ID
-- severity
-- evidence handle
-- containment state
-- recovery actions
-- workload context
-
-## Avoid Global Stop
-
-Do not use SMI-style global stop for every error.
-
-Containment domain should be minimal:
-
-thread -> core -> device -> socket -> system
-
-Only global synchronization for true system failures.
-
-## RVSoC-Sim Integration
-
-Simulation should support:
-
-- fault injection
-- agent reset
-- delayed completion
-- stale event filtering
-- evidence collection
-- recovery replay
+The ownership of complete diagnosis is the corrected part: it moved from HostFW to the independent RAS Processor, leaving HostFW as the host-context action executor and boot reconfiguration authority.
