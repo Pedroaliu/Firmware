@@ -1,0 +1,45 @@
+# Build directories
+/build/
+**/build/
+
+# CMake generated files
+CMakeFiles/
+cmake-build-*/
+*.cmake.user
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled/binary artifacts
+*.o
+*.obj
+*.a
+*.so
+*.elf
+*.bin
+*.map
+*.hex
+*.dis
+*.readelf
+*.dump
+
+# Editor/IDE files
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# QEMU / emulator artifacts
+qemu-logs/
+
+# Python cache (if any tooling uses Python)
+__pycache__/
+*.py[cod]
