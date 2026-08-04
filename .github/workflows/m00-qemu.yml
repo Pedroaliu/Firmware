@@ -1,0 +1,35 @@
+name: M00 QEMU UART
+
+on:
+  push:
+    branches:
+      - archfw-m00-qemu-uart
+  pull_request:
+
+jobs:
+  qemu-uart-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm qemu-system-misc
+
+      - name: Build ArchFW
+        run: make TOOLCHAIN=llvm
+
+      - name: Check ELF entry
+        run: |
+          test "$(readelf -h build/qemu-virt/archfw.elf | awk '/Entry point address/ {print $4}')" = "0x80000000"
+
+      - name: Boot and check UART
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          timeout 5s make run 2>&1 | tee qemu-uart.log || status=$?
+          test "$status" -eq 0 -o "$status" -eq 124
+          grep -F "ArchFW microkernel M00" qemu-uart.log
+          grep -F "M00 UART bootstrap complete" qemu-uart.log
