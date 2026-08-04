@@ -1,92 +1,18 @@
-# ArchFW Agent Protocol v0.1
+# ArchFW Agent Protocol v0.1 — Superseded
 
-## Purpose
+This document is retained as design history.
 
-Different firmware processors need a common semantic protocol.
+Use [ArchFW Agent Protocol v0.2](ARCHFW_AGENT_PROTOCOL_V0.2.md) for the current wire envelope, generation model, ownership checks, reset reconciliation, FFDC descriptors and transport bindings.
 
-Agents:
+The v0.1 ideas retained in v0.2 are:
 
-- HostFW
-- SBE
-- SCP
-- OCC
-- GPU firmware
-- NPU firmware
-- DPU firmware
-- BMC
+- one semantic protocol across SBE, SCP, memory, PCIe/CXL, RAS, BMC and simulator Agents;
+- no compiler-layout-dependent shared C structures;
+- versioned messages;
+- request, acceptance, progress and completion states;
+- `AgentId`, `BootEpoch` and `TransactionId` identity;
+- transport independence across mailbox, shared-memory ring, doorbell, MCTP/PLDM and simulation;
+- explicit descriptor ownership and completion queues;
+- future ArchIDL-generated native, IPC, remote and simulator bindings.
 
-## Do not share C structs
-
-Communication ABI must not depend on compiler layout.
-
-Use versioned messages.
-
-## Message Model
-
-```
-Request
-  |
-Accepted
-  |
-Progress
-  |
-Completion
-```
-
-Support:
-
-- RetryLater
-- Event
-- Cancel
-- QueryState
-
-## Identity
-
-Transactions use:
-
-```
-AgentId
-BootEpoch
-TransactionId
-```
-
-This prevents stale completion after agent reset.
-
-## Transport
-
-The semantic protocol can run over:
-
-- mailbox
-- shared memory ring
-- doorbell interrupt
-- MCTP/PLDM
-- simulator transaction model
-
-## Relation to Virtio
-
-Borrow concepts:
-
-- descriptor ownership
-- ring buffer
-- completion queue
-- notification
-
-But extend for firmware:
-
-- ownership transfer
-- reset reconciliation
-- RAS evidence
-- capability discovery
-
-## Interface Definition
-
-Long term direction:
-
-ArchIDL defines interfaces.
-
-Generated bindings:
-
-- C++ native API
-- IPC stubs
-- remote agent protocol
-- simulator adapters
+v0.2 adds topology, service, Agent and target generations; idempotency/replay classification; ownership validation; bulk evidence descriptors; and deterministic reset reconciliation.
