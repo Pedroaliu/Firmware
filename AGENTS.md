@@ -5,7 +5,7 @@ Before answering project-specific questions or modifying this repository:
 1. inspect the default branch and recent commits;
 2. read `PROJECT_CONTEXT.md`;
 3. read `README.md`;
-4. read `docs/JIXIA_ARCHITECTURE_V0.2.md`;
+4. read `docs/JIXIA_ARCHITECTURE_V0.3.md`;
 5. read `docs/JIXIA_PROJECT_SOURCES.md`;
 6. inspect current source paths, namespaces, and build files;
 7. locate relevant uploaded references by titles in the source manifest.
