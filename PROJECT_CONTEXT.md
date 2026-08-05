@@ -126,7 +126,7 @@ Before answering a Jixia/Firmware project question in a new chat:
 
 1. Inspect `Pedroaliu/Firmware`, its default branch, and latest commits.
 2. Read `PROJECT_CONTEXT.md` and `README.md`.
-3. Read `docs/JIXIA_ARCHITECTURE_V0.2.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
+3. Read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
 4. Inspect current source paths, namespaces, build files, and milestone state.
 5. Read relevant historical `ARCHFW_*` documents when useful.
 6. Locate referenced PDFs through the current conversation or File Library using the source manifest.
