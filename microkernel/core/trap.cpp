@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "uart.h"
+#include "microkernel/arch/riscv/trap_frame.h"
 
 namespace jixia::microkernel::trap {
 
