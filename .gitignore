@@ -5,6 +5,7 @@
 # CMake generated files
 CMakeFiles/
 cmake-build-*/
+CMakeUserPresets.json
 *.cmake.user
 CMakeCache.txt
 cmake_install.cmake
