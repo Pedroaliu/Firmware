@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050" role="img" aria-labelledby="title desc">
+  <title id="title">Jixia Firmware Platform Architecture</title>
+  <desc id="desc">Overview of the Jixia boot chain, host firmware microkernel, platform model, firmware-native hypervisor, logical partitions, service domains, security, RAS, dynamic debug, lifecycle, and simulator co-design.</desc>
+
+  <defs>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .panel { fill: #ffffff; stroke: #c9d3e1; stroke-width: 2; rx: 14; }
+      .panel-blue { fill: #eef5ff; stroke: #7da3d8; stroke-width: 2; rx: 12; }
+      .panel-green { fill: #effaf3; stroke: #77b989; stroke-width: 2; rx: 12; }
+      .panel-orange { fill: #fff5e9; stroke: #e5a14d; stroke-width: 2; rx: 12; }
+      .panel-purple { fill: #f5f0ff; stroke: #9b7bd2; stroke-width: 2; rx: 12; }
+      .panel-red { fill: #fff0f2; stroke: #db7b88; stroke-width: 2; rx: 12; }
+      .panel-gray { fill: #f1f3f6; stroke: #9aa7b8; stroke-width: 2; rx: 12; }
+      .header { fill: #173d70; rx: 12; }
+      .title { font: 700 34px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #142033; }
+      .subtitle { font: 500 16px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #52647b; }
+      .h1 { font: 700 20px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #142033; }
+      .h2 { font: 700 17px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #142033; }
+      .h2-light { font: 700 19px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #ffffff; }
+      .body { font: 500 14px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #26374d; }
+      .small { font: 500 12px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #53657b; }
+      .tiny { font: 500 11px Inter, Segoe UI, Arial, 'Noto Sans CJK SC', sans-serif; fill: #53657b; }
+      .code { font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #35506f; }
+      .arrow { stroke: #35577c; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .arrow-bi { stroke: #35577c; stroke-width: 2.5; fill: none; marker-start: url(#arrow-back); marker-end: url(#arrow); }
+      .divider { stroke: #d5dde8; stroke-width: 1.5; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#35577c"/>
+    </marker>
+    <marker id="arrow-back" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 10 0 L 0 5 L 10 10 z" fill="#35577c"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1050"/>
+
+  <!-- Title -->
+  <text class="title" x="42" y="52">Jixia / 稷下 Firmware Platform</text>
+  <text class="subtitle" x="42" y="82">Open · Native · Secure · Observable · Recoverable</text>
+  <text class="subtitle" x="42" y="108">A RISC-V firmware-native platform for peer LPARs, native Linux/KVM, RAS, trusted and confidential computing.</text>
+
+  <!-- Execution modes -->
+  <rect class="panel" x="480" y="25" width="760" height="105"/>
+  <text class="h1" x="860" y="52" text-anchor="middle">Execution Modes</text>
+  <rect class="panel-green" x="500" y="66" width="220" height="47"/>
+  <text class="h2" x="610" y="87" text-anchor="middle">Native Linux</text>
+  <text class="small" x="610" y="105" text-anchor="middle">HS-mode host · KVM owner</text>
+  <rect class="panel-blue" x="750" y="66" width="220" height="47"/>
+  <text class="h2" x="860" y="87" text-anchor="middle">Firmware-native LPAR</text>
+  <text class="small" x="860" y="105" text-anchor="middle">ArchHV · peer partitions</text>
+  <rect class="panel-orange" x="1000" y="66" width="220" height="47"/>
+  <text class="h2" x="1110" y="87" text-anchor="middle">KVM Compatibility</text>
+  <text class="small" x="1110" y="105" text-anchor="middle">optional ABI/profile path</text>
+
+  <!-- Design principles -->
+  <rect class="panel" x="1260" y="25" width="300" height="160"/>
+  <text class="h1" x="1280" y="53">Design Principles</text>
+  <text class="body" x="1280" y="79">• Platform model first</text>
+  <text class="body" x="1280" y="101">• Minimal trusted microkernel</text>
+  <text class="body" x="1280" y="123">• Explicit ownership and contracts</text>
+  <text class="body" x="1280" y="145">• RAS, trace and debug by design</text>
+  <text class="body" x="1280" y="167">• Protection · detection · recovery</text>
+
+  <!-- Boot chain -->
+  <rect class="panel-blue" x="30" y="160" width="245" height="610"/>
+  <text class="h1" x="152" y="192" text-anchor="middle">Boot Chain</text>
+
+  <rect class="panel" x="52" y="215" width="201" height="72"/>
+  <text class="h2" x="152" y="242" text-anchor="middle">Immutable Root</text>
+  <text class="small" x="152" y="264" text-anchor="middle">ROM · hardware root of trust</text>
+  <path class="arrow" d="M152 287 L152 317"/>
+
+  <rect class="panel" x="52" y="318" width="201" height="72"/>
+  <text class="h2" x="152" y="345" text-anchor="middle">Boot0</text>
+  <text class="small" x="152" y="367" text-anchor="middle">codename Pangu / 盘古</text>
+  <path class="arrow" d="M152 390 L152 420"/>
+
+  <rect class="panel" x="52" y="421" width="201" height="106"/>
+  <text class="h2" x="152" y="448" text-anchor="middle">Host Firmware</text>
+  <text class="small" x="152" y="470" text-anchor="middle">microkernel · codename Mozi</text>
+  <text class="small" x="152" y="492" text-anchor="middle">initialize · isolate · measure</text>
+  <text class="code" x="152" y="514" text-anchor="middle">jixia::microkernel</text>
+  <path class="arrow" d="M152 527 L152 557"/>
+
+  <rect class="panel" x="52" y="558" width="201" height="72"/>
+  <text class="h2" x="152" y="585" text-anchor="middle">Platform Commit</text>
+  <text class="small" x="152" y="607" text-anchor="middle">topology · policy · ownership</text>
+  <path class="arrow" d="M152 630 L152 660"/>
+
+  <rect class="panel" x="52" y="661" width="201" height="72"/>
+  <text class="h2" x="152" y="688" text-anchor="middle">Runtime Launch</text>
+  <text class="small" x="152" y="710" text-anchor="middle">native host or ArchHV + LPARs</text>
+
+  <!-- Main stack: microkernel -->
+  <rect class="panel" x="305" y="160" width="915" height="155"/>
+  <rect class="header" x="305" y="160" width="915" height="42"/>
+  <text class="h2-light" x="762" y="188" text-anchor="middle">Host Firmware Microkernel · Mozi / 墨子</text>
+  <text class="code" x="325" y="226">jixia::microkernel</text>
+
+  <rect class="panel-blue" x="325" y="241" width="105" height="52"/>
+  <text class="small" x="377" y="264" text-anchor="middle">Scheduler</text>
+  <text class="tiny" x="377" y="281" text-anchor="middle">hart lifecycle</text>
+  <rect class="panel-blue" x="440" y="241" width="105" height="52"/>
+  <text class="small" x="492" y="264" text-anchor="middle">Memory</text>
+  <text class="tiny" x="492" y="281" text-anchor="middle">domains</text>
+  <rect class="panel-blue" x="555" y="241" width="105" height="52"/>
+  <text class="small" x="607" y="264" text-anchor="middle">Interrupts</text>
+  <text class="tiny" x="607" y="281" text-anchor="middle">events</text>
+  <rect class="panel-blue" x="670" y="241" width="105" height="52"/>
+  <text class="small" x="722" y="264" text-anchor="middle">IPC</text>
+  <text class="tiny" x="722" y="281" text-anchor="middle">service fabric</text>
+  <rect class="panel-blue" x="785" y="241" width="105" height="52"/>
+  <text class="small" x="837" y="264" text-anchor="middle">Capability</text>
+  <text class="tiny" x="837" y="281" text-anchor="middle">least privilege</text>
+  <rect class="panel-blue" x="900" y="241" width="105" height="52"/>
+  <text class="small" x="952" y="264" text-anchor="middle">Ownership</text>
+  <text class="tiny" x="952" y="281" text-anchor="middle">resource authority</text>
+  <rect class="panel-blue" x="1015" y="241" width="90" height="52"/>
+  <text class="small" x="1060" y="264" text-anchor="middle">Security</text>
+  <text class="tiny" x="1060" y="281" text-anchor="middle">launch</text>
+  <rect class="panel-blue" x="1115" y="241" width="85" height="52"/>
+  <text class="small" x="1157" y="264" text-anchor="middle">Evidence</text>
+  <text class="tiny" x="1157" y="281" text-anchor="middle">attest</text>
+
+  <!-- Platform model -->
+  <path class="arrow-bi" d="M762 315 L762 338"/>
+  <rect class="panel-blue" x="305" y="340" width="915" height="137"/>
+  <text class="h1" x="762" y="370" text-anchor="middle">Platform Model · Nuwa / 女娲</text>
+  <text class="code" x="762" y="392" text-anchor="middle">jixia::platform::model</text>
+  <rect class="panel" x="325" y="408" width="165" height="49"/>
+  <text class="small" x="407" y="430" text-anchor="middle">Topology &amp; Resources</text>
+  <text class="tiny" x="407" y="447" text-anchor="middle">CPU · memory · I/O · fabric</text>
+  <rect class="panel" x="505" y="408" width="165" height="49"/>
+  <text class="small" x="587" y="430" text-anchor="middle">Ownership Model</text>
+  <text class="tiny" x="587" y="447" text-anchor="middle">LPAR · service · device</text>
+  <rect class="panel" x="685" y="408" width="165" height="49"/>
+  <text class="small" x="767" y="430" text-anchor="middle">Policy &amp; Contracts</text>
+  <text class="tiny" x="767" y="447" text-anchor="middle">QoS · security · compatibility</text>
+  <rect class="panel" x="865" y="408" width="155" height="49"/>
+  <text class="small" x="942" y="430" text-anchor="middle">Dynamic Change</text>
+  <text class="tiny" x="942" y="447" text-anchor="middle">hotplug · degrade · repair</text>
+  <rect class="panel" x="1035" y="408" width="165" height="49"/>
+  <text class="small" x="1117" y="430" text-anchor="middle">Graph Epoch</text>
+  <text class="tiny" x="1117" y="447" text-anchor="middle">commit · version · evidence</text>
+
+  <!-- Hypervisor -->
+  <path class="arrow-bi" d="M762 477 L762 500"/>
+  <rect class="panel-blue" x="305" y="502" width="915" height="120"/>
+  <text class="h1" x="762" y="531" text-anchor="middle">Firmware-native Hypervisor · ArchHV</text>
+  <text class="code" x="762" y="552" text-anchor="middle">jixia::hypervisor</text>
+  <text class="small" x="340" y="582">vCPU dispatch</text>
+  <text class="small" x="470" y="582">G-stage memory</text>
+  <text class="small" x="610" y="582">virtual interrupts</text>
+  <text class="small" x="765" y="582">IOMMU / DMA</text>
+  <text class="small" x="900" y="582">resource contracts</text>
+  <text class="small" x="1060" y="582">LPAR lifecycle</text>
+  <text class="tiny" x="340" y="604">scheduler: Yixing</text>
+  <text class="tiny" x="560" y="604">contracts: Shouyue</text>
+  <text class="tiny" x="790" y="604">isolation: Dunshan</text>
+  <text class="tiny" x="1015" y="604">time: Sunbin</text>
+
+  <!-- LPARs -->
+  <path class="arrow-bi" d="M762 622 L762 645"/>
+  <rect class="panel" x="305" y="647" width="915" height="122"/>
+  <text class="h1" x="762" y="676" text-anchor="middle">Logical Partitions</text>
+  <rect class="panel-green" x="325" y="694" width="270" height="56"/>
+  <text class="h2" x="460" y="718" text-anchor="middle">Normal LPAR</text>
+  <text class="small" x="460" y="738" text-anchor="middle">trusts ArchHV · performance and compatibility</text>
+  <rect class="panel-blue" x="615" y="694" width="270" height="56"/>
+  <text class="h2" x="750" y="718" text-anchor="middle">Measured LPAR</text>
+  <text class="small" x="750" y="738" text-anchor="middle">measured launch · evidence · attestation</text>
+  <rect class="panel-red" x="905" y="694" width="295" height="56"/>
+  <text class="h2" x="1052" y="718" text-anchor="middle">Confidential LPAR</text>
+  <text class="small" x="1052" y="738" text-anchor="middle">protected state · memory integrity · restricted debug</text>
+
+  <!-- Hardware -->
+  <path class="arrow-bi" d="M762 769 L762 792"/>
+  <rect class="panel-gray" x="305" y="794" width="915" height="103"/>
+  <text class="h1" x="762" y="823" text-anchor="middle">RISC-V SoC Hardware Platform</text>
+  <text class="small" x="345" y="855">RV64 cores</text>
+  <text class="small" x="470" y="855">memory subsystem</text>
+  <text class="small" x="630" y="855">IMSIC / APLIC</text>
+  <text class="small" x="770" y="855">LPID-aware IOMMU</text>
+  <text class="small" x="930" y="855">PCIe / CXL / devices</text>
+  <text class="small" x="1100" y="855">security + RAS</text>
+  <text class="tiny" x="762" y="878" text-anchor="middle">future: per-LPID encryption · integrity · protected state · hardware trace</text>
+
+  <!-- Right support domains -->
+  <rect class="panel" x="1260" y="205" width="300" height="565"/>
+  <text class="h1" x="1280" y="236">Support Domains</text>
+
+  <rect class="panel-orange" x="1280" y="255" width="260" height="74"/>
+  <text class="h2" x="1410" y="281" text-anchor="middle">Driver Service Domain</text>
+  <text class="small" x="1410" y="303" text-anchor="middle">Luban / 鲁班 · Linux drivers and boot I/O</text>
+  <text class="code" x="1410" y="319" text-anchor="middle">services/driver_domain</text>
+
+  <rect class="panel-green" x="1280" y="343" width="260" height="74"/>
+  <text class="h2" x="1410" y="369" text-anchor="middle">Firmware Personalities</text>
+  <text class="small" x="1410" y="391" text-anchor="middle">Yuange / 元歌 · UEFI · ACPI · DT · U-Boot</text>
+  <text class="code" x="1410" y="407" text-anchor="middle">jixia::firmware_personality</text>
+
+  <rect class="panel-purple" x="1280" y="431" width="260" height="74"/>
+  <text class="h2" x="1410" y="457" text-anchor="middle">RAS Diagnosis</text>
+  <text class="small" x="1410" y="479" text-anchor="middle">Bianque / 扁鹊 · classify · correlate · FFDC</text>
+  <text class="code" x="1410" y="495" text-anchor="middle">jixia::ras::diagnosis</text>
+
+  <rect class="panel-orange" x="1280" y="519" width="260" height="74"/>
+  <text class="h2" x="1410" y="545" text-anchor="middle">Recovery</text>
+  <text class="small" x="1410" y="567" text-anchor="middle">Taiyi / 太乙 · restart · degrade · restore</text>
+  <text class="code" x="1410" y="583" text-anchor="middle">jixia::ras::recovery</text>
+
+  <rect class="panel-blue" x="1280" y="607" width="260" height="74"/>
+  <text class="h2" x="1410" y="633" text-anchor="middle">Dynamic Debug &amp; Trace</text>
+  <text class="small" x="1410" y="655" text-anchor="middle">Guigu / 鬼谷 · event breakpoints · replay</text>
+  <text class="code" x="1410" y="671" text-anchor="middle">jixia::debug</text>
+
+  <rect class="panel-green" x="1280" y="695" width="260" height="56"/>
+  <text class="h2" x="1410" y="719" text-anchor="middle">Virtual Time</text>
+  <text class="small" x="1410" y="740" text-anchor="middle">Sunbin / 孙膑 · timers · migration continuity</text>
+
+  <!-- Cross-cutting bottom -->
+  <rect class="panel" x="30" y="920" width="1530" height="105"/>
+
+  <text class="h2" x="60" y="949">Security &amp; Trust</text>
+  <text class="small" x="60" y="974">Measured boot · root of trust · attestation · key lifecycle · confidential computing</text>
+  <line class="divider" x1="425" y1="938" x2="425" y2="1008"/>
+
+  <text class="h2" x="452" y="949">RAS &amp; Self-Recovery</text>
+  <text class="small" x="452" y="974">Detect → Diagnose → Contain → Recover · structured FFDC · degraded operation</text>
+  <line class="divider" x1="845" y1="938" x2="845" y2="1008"/>
+
+  <text class="h2" x="872" y="949">Lifecycle &amp; Debug Policy</text>
+  <text class="small" x="872" y="974">Develop · verify · deploy · operate · service · update · measured debug state</text>
+  <line class="divider" x1="1220" y1="938" x2="1220" y2="1008"/>
+
+  <text class="h2" x="1247" y="949">Simulator Interface</text>
+  <text class="small" x="1247" y="974">Jingjie / 镜界</text>
+  <text class="small" x="1247" y="995">functional · timing · RTL · fault injection · replay</text>
+
+  <!-- Side links -->
+  <path class="arrow-bi" d="M1220 270 L1260 290"/>
+  <path class="arrow-bi" d="M1220 380 L1260 380"/>
+  <path class="arrow-bi" d="M1220 525 L1260 468"/>
+  <path class="arrow-bi" d="M1220 565 L1260 556"/>
+  <path class="arrow-bi" d="M1220 420 L1260 644"/>
+
+  <text class="tiny" x="1560" y="1038" text-anchor="end">Jixia architecture overview · semantic source paths + cultural codenames</text>
+</svg>

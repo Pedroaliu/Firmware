@@ -4,22 +4,54 @@
 
 > 稷下容百家，墨子立其规；女娲构其形，鲁班驭百器。
 
-Jixia is a learning-driven server platform project. It studies a different systems path from the dominant `x86/Arm + Host Linux + KVM` model:
+<p align="center">
+  <a href="docs/images/jixia-firmware-architecture.svg">
+    <img src="docs/images/jixia-firmware-architecture.svg" alt="Jixia firmware platform architecture overview" width="100%">
+  </a>
+</p>
 
-- the physical machine can launch multiple peer logical machines directly from firmware;
-- partition identity, resource contracts, I/O ownership, RAS, attestation, and future confidential computing are designed as one platform model;
-- complex device drivers can live in a Linux service domain instead of the microkernel or minimum hypervisor;
-- the firmware and the full-system simulator grow together in a CECSIM-style workflow;
-- native Linux/KVM remains a supported profile and a mainstream comparison baseline.
+<p align="center"><em>Jixia firmware platform overview — click the diagram to open the full-size vector image.</em></p>
 
-This is not an attempt to clone IBM PowerVM, EDK II, or KVM. It uses RISC-V to study why those systems put complexity in different places and what trade-offs follow.
+Jixia is a learning-driven server platform project. It studies what a machine looks like when firmware, logical partitions, RAS, trusted/confidential computing, and a full-system simulator are designed together from the first instruction.
 
-## Canonical names
+It is not an attempt to clone IBM PowerVM, EDK II, or KVM. Native Linux/KVM remains a supported execution profile and the mainstream comparison baseline.
 
-| Component | Role |
+## Naming policy
+
+**Jixia / 稷下** is the public project and platform name.
+
+Chinese cultural names are implementation codenames used in architecture diagrams, releases, presentations, and module descriptions. Source directories, public interfaces, types, functions, and C++ namespaces use clear English technical meaning.
+
+Examples:
+
+```text
+Mozi / 墨子      -> host firmware microkernel -> microkernel/ -> jixia::microkernel
+Pangu / 盘古     -> immutable Boot0           -> boot/        -> jixia::boot
+Nuwa / 女娲      -> PlatformGraph              -> platform/model/
+Luban / 鲁班     -> Linux driver domain       -> services/driver_domain/
+Yuange / 元歌    -> firmware personalities    -> firmware_personality/
+Guigu / 鬼谷     -> dynamic debug             -> debug/       -> jixia::debug
+Jingjie / 镜界   -> full-system simulator     -> interfaces/simulator/
+```
+
+Low-level assembly and cross-language boundaries use a small stable C ABI with `jixia_` symbols. C++ implementation code uses nested namespaces:
+
+```cpp
+namespace jixia::microkernel {}
+namespace jixia::platform::graph {}
+namespace jixia::hypervisor::scheduler {}
+namespace jixia::ras::diagnosis {}
+namespace jixia::debug::replay {}
+```
+
+A contributor does not need to know the cultural references to navigate or extend the code.
+
+## Architecture codenames
+
+| Codename | Technical responsibility |
 |---|---|
 | **Jixia / 稷下** | Entire firmware-native platform |
-| **Pangu / 盘古** | Future immutable Boot0 / first-instruction root |
+| **Pangu / 盘古** | Immutable Boot0 / first-instruction root |
 | **Mozi / 墨子** | Host firmware microkernel |
 | **Nuwa / 女娲** | PlatformGraph and topology construction/repair |
 | **ArchHV** | Firmware-native type-1 hypervisor |
@@ -38,13 +70,13 @@ This is not an attempt to clone IBM PowerVM, EDK II, or KVM. It uses RISC-V to s
 
 ```text
 NATIVE_HOST
-  Pangu/Mozi -> native HS-mode Linux -> KVM guests
+  Boot0/microkernel -> native HS-mode Linux -> KVM guests
 
 SINGLE_LPAR
-  Pangu/Mozi -> ArchHV -> one VS-mode logical partition
+  Boot0/microkernel -> ArchHV -> one VS-mode logical partition
 
 MULTI_LPAR
-  Pangu/Mozi -> ArchHV -> multiple peer logical partitions
+  Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
 A single LPAR is not automatically a normal KVM host. Native Linux must own HS-mode and the RISC-V H extension to run ordinary KVM guests; a Linux LPAR under ArchHV normally runs in VS-mode.
@@ -55,7 +87,8 @@ Completed:
 
 - `M00-00`: RV64 QEMU virt entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap path.
-- canonical naming transition from ArchFW/kernel artifacts to Jixia/Mozi.
+- project identity established as Jixia.
+- executable core moved to semantic `microkernel/` paths and a freestanding C++ `jixia::*` namespace boundary.
 
 Next:
 
@@ -72,7 +105,7 @@ M00-06  Privilege transition
 Prerequisites:
 
 - CMake 3.20 or newer
-- `riscv64-unknown-elf-gcc` toolchain
+- `riscv64-unknown-elf-gcc` and `riscv64-unknown-elf-g++`
 - `qemu-system-riscv64`
 
 ```bash
@@ -83,7 +116,7 @@ cmake --build build
 ./scripts/run-qemu.sh
 ```
 
-Generated artifacts include:
+Generated artifacts:
 
 ```text
 build/jixia.elf
@@ -96,34 +129,34 @@ build/jixia.readelf
 ## Repository layout
 
 ```text
-mozi/                   executable host firmware microkernel
-pangu/                  future Boot0 contract
-nuwa/                   PlatformGraph contract
-archhv/                 firmware-native partition runtime contracts
-services/luban/         Linux driver and boot service
-personalities/yuange/   OS-facing firmware personalities
-ras/bianque/            RAS diagnosis
-recovery/taiyi/         recovery actions
-debug/guigu/             dynamic debug and introspection
-time/sunbin/             virtual time and migration
-security/confidential/  confidential LPAR architecture
-interfaces/jingjie/     firmware-simulator boundary
+boot/                    Boot0 contract (codename Pangu)
+microkernel/             executable host firmware microkernel (Mozi)
+platform/model/          PlatformGraph and ownership model (Nuwa)
+hypervisor/              firmware-native partition runtime (ArchHV)
+services/driver_domain/  Linux driver and boot service (Luban)
+firmware_personality/    OS-facing personalities (Yuange)
+ras/diagnosis/           RAS diagnosis (Bianque)
+ras/recovery/            recovery actions (Taiyi)
+debug/                   dynamic debug and introspection (Guigu)
+virtualization/time/     virtual time and migration (Sunbin)
+security/confidential/   confidential LPAR architecture
+interfaces/simulator/    firmware-simulator boundary (Jingjie)
 
-platform/qemu_virt/     current platform backend
-linker/                 linker scripts
-scripts/                build/run helpers
-docs/                   architecture and source records
+platform/qemu_virt/      current physical-platform backend
+linker/                  linker scripts
+scripts/                 build/run helpers
+docs/                    architecture and source records
 ```
 
-Placeholder component directories describe ownership and planned interfaces; they do not claim completed implementations.
+Placeholder module directories define ownership and planned interfaces; they do not claim completed implementations.
 
 ## Read first
 
-Every new project conversation or coding session should begin with:
+Every new project conversation or coding session begins with:
 
 1. [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md)
-2. [`docs/JIXIA_ARCHITECTURE_V0.2.md`](docs/JIXIA_ARCHITECTURE_V0.2.md)
+2. [`docs/JIXIA_ARCHITECTURE_V0.3.md`](docs/JIXIA_ARCHITECTURE_V0.3.md)
 3. [`docs/JIXIA_PROJECT_SOURCES.md`](docs/JIXIA_PROJECT_SOURCES.md)
 4. current code and recent commits
 
-Older `docs/ARCHFW_*` files are preserved as historical design records. Jixia/Mozi and the names above are canonical.
+Older `docs/ARCHFW_*` and `JIXIA_ARCHITECTURE_V0.2.md` files remain historical design records. Jixia is canonical; cultural component names are codenames, while code uses semantic English names and `jixia::*` namespaces.
