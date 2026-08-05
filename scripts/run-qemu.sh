@@ -7,7 +7,8 @@ readonly ROOT_DIR="$(
     pwd
 )"
 
-readonly FIRMWARE="${ROOT_DIR}/build/archfw.bin"
+readonly BUILD_DIR="${1:-build}"
+readonly FIRMWARE="${ROOT_DIR}/${BUILD_DIR}/archfw.bin"
 
 if [[ ! -f "${FIRMWARE}" ]]; then
     echo "Firmware image not found: ${FIRMWARE}" >&2

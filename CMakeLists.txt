@@ -39,6 +39,8 @@ add_executable(
     kernel/arch/riscv/start.S
     kernel/core/kernel_main.c
     platform/qemu_virt/uart.c
+    kernel/arch/riscv/trap.S
+    kernel/core/trap.c
 )
 
 target_include_directories(

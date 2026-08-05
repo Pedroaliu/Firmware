@@ -18,8 +18,8 @@ _start:
      *
      * mstatus.MIE is bit 3.
      */
-    csrci mstatus, 8
-    csrw  mie, zero
+     csrci mstatus, 8
+    ; csrw  mie, zero
 
     /*
      * Park all secondary harts.
@@ -73,9 +73,19 @@ _start:
 
 .Lbss_done:
     /*
-     * a0 and a1 are still intact, so they become:
+     * Install the machine-mode trap vector.
      *
-     * kernel_main(hart_id, dtb_address)
+     * trap_entry is four-byte aligned, therefore the low
+     * two mtvec mode bits are zero and Direct mode is used.
+     */
+    la   t0, trap_entry
+    csrw mtvec, t0
+
+    /*
+     * a0 and a1 still contain:
+     *
+     * a0 = hart ID
+     * a1 = device tree address
      */
     call kernel_main
 
