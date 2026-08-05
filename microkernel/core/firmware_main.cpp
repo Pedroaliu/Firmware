@@ -1,10 +1,10 @@
-#include <cstdint>
+#include <stdint.h>
 
 #include "uart.h"
 
 namespace jixia::microkernel {
 
-[[noreturn]] void main(std::uintptr_t hart_id, std::uintptr_t dtb_address)
+[[noreturn]] void main(uintptr_t hart_id, uintptr_t dtb_address)
 {
     uart_puts("\n");
     uart_puts("Jixia M00\n");
@@ -31,7 +31,7 @@ namespace jixia::microkernel {
 } // namespace jixia::microkernel
 
 extern "C" [[noreturn]]
-void jixia_microkernel_main(std::uintptr_t hart_id, std::uintptr_t dtb_address)
+void jixia_microkernel_main(uintptr_t hart_id, uintptr_t dtb_address)
 {
     jixia::microkernel::main(hart_id, dtb_address);
 }

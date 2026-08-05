@@ -20,23 +20,6 @@ set(JIXIA_ARCH_FLAGS
     -mcmodel=medany
 )
 
-set(JIXIA_COMMON_FLAGS
-    ${JIXIA_ARCH_FLAGS}
-
-    -ffreestanding
-    -fno-builtin
-    -fno-stack-protector
-    -fno-pic
-    -fno-pie
-
-    -ffunction-sections
-    -fdata-sections
-
-    -Wall
-    -Wextra
-    -Werror
-)
-
 add_executable(
     jixia.elf
 
@@ -57,7 +40,19 @@ target_include_directories(
 target_compile_options(
     jixia.elf
     PRIVATE
-        ${JIXIA_COMMON_FLAGS}
+        ${JIXIA_ARCH_FLAGS}
+
+        $<$<COMPILE_LANGUAGE:C,CXX>:-ffreestanding>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-builtin>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-stack-protector>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-pic>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-pie>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Werror>
+
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
         $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
         $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
