@@ -1,18 +1,18 @@
-#include <cstdint>
+#include <stdint.h>
 
 #include "uart.h"
 
 namespace jixia::microkernel::trap {
 
 [[noreturn]] void fatal(
-    std::uintptr_t cause,
-    std::uintptr_t epc,
-    std::uintptr_t tval)
+    uintptr_t cause,
+    uintptr_t epc,
+    uintptr_t tval)
 {
-    constexpr std::uintptr_t interrupt_bit =
-        std::uintptr_t{1} << ((sizeof(std::uintptr_t) * 8U) - 1U);
+    constexpr uintptr_t interrupt_bit =
+        uintptr_t{1} << ((sizeof(uintptr_t) * 8U) - 1U);
 
-    const std::uintptr_t cause_code = cause & ~interrupt_bit;
+    const uintptr_t cause_code = cause & ~interrupt_bit;
 
     uart_puts("\n");
     uart_puts("[Jixia][Microkernel][fatal trap]\n");
@@ -46,9 +46,9 @@ namespace jixia::microkernel::trap {
 
 extern "C" [[noreturn]]
 void jixia_trap_fatal(
-    std::uintptr_t cause,
-    std::uintptr_t epc,
-    std::uintptr_t tval)
+    uintptr_t cause,
+    uintptr_t epc,
+    uintptr_t tval)
 {
     jixia::microkernel::trap::fatal(cause, epc, tval);
 }
