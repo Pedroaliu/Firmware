@@ -28,7 +28,6 @@ add_executable(
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
     platform/qemu_virt/uart.c
-        microkernel/arch/riscv/trap_frame.h
 )
 
 target_include_directories(
