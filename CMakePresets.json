@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "jixia-rv64-debug",
+      "displayName": "Jixia RV64 Debug",
+      "description": "Freestanding RV64 firmware build for QEMU virt",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/clion-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/riscv64-unknown-elf.cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "jixia-rv64-debug",
+      "displayName": "Build Jixia RV64 Debug",
+      "configurePreset": "jixia-rv64-debug",
+      "targets": [
+        "jixia.elf"
+      ]
+    }
+  ]
+}
