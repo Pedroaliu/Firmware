@@ -1,8 +1,8 @@
 # Jixia Project Context
 
-> This file is the persistent entry point for future chat sessions, contributors, and coding agents.
+> Persistent entry point for future chat sessions, contributors, and coding agents.
 >
-> Before discussing or modifying this project in a new conversation, scan the repository and read this file first. Do not rely on conversational memory alone.
+> In a new conversation, scan the repository and read this file before relying on conversational memory.
 
 ## 1. Canonical identity
 
@@ -10,35 +10,54 @@
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Canonical branch:** `main`
 - **Project type:** RISC-V firmware-native server platform research project
-- **Primary purpose:** learning, architecture exploration, and executable system research; not a short path to a commercial UEFI/KVM clone
+- **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
-Jixia studies what a machine looks like when firmware, logical partitions, RAS, security, confidential computing, and a full-system simulator are designed together from the first instruction.
+Jixia studies what a machine looks like when firmware, logical partitions, RAS, trusted/confidential computing, and a full-system simulator are designed together from the first instruction.
 
-The project deliberately studies IBM POWER/PowerVM/LPAR and System z/CECSIM ideas because they provide a different systems perspective from the dominant x86/Arm + Linux/KVM path. The goal is not to claim universal superiority. The goal is to understand alternative placements of complexity and make better trade-offs.
+IBM POWER/PowerVM/LPAR and System z/CECSIM are studied as alternative systems perspectives to the dominant x86/Arm + Linux/KVM path. The goal is better trade-off reasoning, not a claim of universal superiority.
 
-## 2. Canonical component names
+## 2. Naming policy
 
-These names are now architectural names, not temporary chat nicknames.
+Jixia is the project and product brand.
 
-| Name | Canonical responsibility |
-|---|---|
-| **Jixia / 稷下** | Entire firmware-native server platform and this repository |
-| **Pangu / 盘古** | Future immutable Boot0 / first-instruction root |
-| **Mozi / 墨子** | Host firmware microkernel; current executable code lives under `mozi/` |
-| **Nuwa / 女娲** | PlatformGraph, topology construction, topology repair, and generated platform views |
-| **ArchHV** | Firmware-native type-1 hypervisor; keep the technical name for the whole hypervisor |
-| **Yixing / 弈星** | ArchHV scheduling and placement subsystem |
-| **Shouyue / 守约** | Resource contracts, entitlement, accounting, and policy enforcement |
-| **Dunshan / 盾山** | Isolation, IOMMU, DMA windows, and resource protection |
-| **Luban / 鲁班** | Linux driver and boot service domain; device drivers, storage, network, filesystems, RAID tools |
-| **Yuange / 元歌** | Firmware personality framework: UEFI, ACPI, SBI+DT, U-Boot/FIT, minimal test personality |
-| **Bianque / 扁鹊** | RAS diagnosis, error classification, FFDC correlation, predictive failure |
-| **Taiyi / 太乙** | Recovery, restart, failover, rollback, and degraded-mode actions |
-| **Sunbin / 孙膑** | Virtual time, migration time continuity, deterministic replay time model |
-| **Guigu / 鬼谷** | Dynamic debug, introspection, event breakpoints, fault injection, checkpoint/replay control plane |
-| **Jingjie / 镜界** | Full-system simulator/co-simulation environment and the CECSIM-style execution world |
+Chinese cultural names are **implementation codenames**, not source-code vocabulary. They may appear in architecture diagrams, releases, presentations, banners, and module descriptions. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
 
-For confidential computing, use the technical term **Confidential LPAR** until a stable cultural name is deliberately chosen. Do not invent one casually.
+| Codename | Technical responsibility | Semantic code location / namespace |
+|---|---|---|
+| **Pangu / 盘古** | Immutable Boot0 | `boot/`, `jixia::boot` |
+| **Mozi / 墨子** | Host firmware microkernel | `microkernel/`, `jixia::microkernel` |
+| **Nuwa / 女娲** | PlatformGraph/topology | `platform/model/`, `jixia::platform` |
+| **ArchHV** | Type-1 firmware hypervisor | `hypervisor/`, `jixia::hypervisor` |
+| **Yixing / 弈星** | Scheduling and placement | `jixia::hypervisor::scheduler` |
+| **Shouyue / 守约** | Resource contracts/accounting | `jixia::hypervisor::contract` |
+| **Dunshan / 盾山** | Isolation/IOMMU/DMA | `jixia::hypervisor::isolation` |
+| **Luban / 鲁班** | Linux driver/boot service | `services/driver_domain/`, `jixia::services` |
+| **Yuange / 元歌** | Firmware personalities | `firmware_personality/`, `jixia::firmware_personality` |
+| **Bianque / 扁鹊** | RAS diagnosis | `ras/diagnosis/`, `jixia::ras::diagnosis` |
+| **Taiyi / 太乙** | Recovery | `ras/recovery/`, `jixia::ras::recovery` |
+| **Sunbin / 孙膑** | Virtual time/migration continuity | `virtualization/time/`, `jixia::virtualization::time` |
+| **Guigu / 鬼谷** | Dynamic debug/introspection | `debug/`, `jixia::debug` |
+| **Jingjie / 镜界** | Full-system simulator | `interfaces/simulator/`, `jixia::simulator` |
+
+For confidential computing, keep the technical name **Confidential LPAR** until a stable codename is deliberately chosen.
+
+### Language and ABI rule
+
+- Minimum reset/assembly boundaries remain C-compatible.
+- Cross-language symbols use stable `jixia_` C ABI names.
+- Freestanding implementation code uses C++ nested namespaces.
+- Do not encode codenames into public symbol names, file paths, data schemas, or protocols.
+
+Current examples:
+
+```cpp
+namespace jixia::microkernel {}
+namespace jixia::microkernel::trap {}
+namespace jixia::platform::graph {}
+namespace jixia::hypervisor::scheduler {}
+namespace jixia::ras::diagnosis {}
+namespace jixia::debug::replay {}
+```
 
 ## 3. Architectural baseline
 
@@ -46,62 +65,50 @@ Jixia supports three execution profiles:
 
 ```text
 NATIVE_HOST
-  Pangu/Mozi -> native HS-mode Linux -> KVM guests
+  Boot0/microkernel -> native HS-mode Linux -> KVM guests
 
 SINGLE_LPAR
-  Pangu/Mozi -> ArchHV -> one VS-mode logical partition
+  Boot0/microkernel -> ArchHV -> one VS-mode logical partition
 
 MULTI_LPAR
-  Pangu/Mozi -> ArchHV -> multiple peer logical partitions
+  Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
 A single LPAR is not automatically equivalent to native Linux/KVM. Linux must run in HS-mode to own the RISC-V H extension and act as an ordinary KVM host. A Linux partition under ArchHV runs in VS-mode unless nested virtualization is implemented.
 
-Core architectural principles:
+Core principles:
 
 1. Platform model first.
-2. Mozi owns minimum trusted platform mechanisms, not every feature.
+2. The microkernel owns minimum trusted mechanisms, not every feature.
 3. Global orchestration belongs to host firmware; local agents contain local faults.
-4. Physical device drivers do not belong in the minimum hypervisor.
-5. Complex drivers live in Luban or dedicated service domains.
-6. Yuange personalities are projections of one filtered virtual PlatformGraph, not independent sources of truth.
+4. Complex physical device drivers do not belong in the minimum hypervisor.
+5. Linux endpoint drivers live in a driver service domain.
+6. UEFI/ACPI/DT/U-Boot personalities are projections of one filtered PlatformGraph.
 7. Resource ownership has one authoritative manager.
-8. Partition identity must eventually span translation, interrupts, IOMMU, counters, trace, energy, and RAS.
+8. Partition identity eventually spans translation, interrupts, IOMMU, counters, trace, energy, and RAS.
 9. Debug/replay and fault injection are first-class architecture features.
 10. Protection, detection, and recovery are designed separately.
-11. Normal, measured, and confidential LPARs share one lifecycle model but have different trust assumptions.
+11. Normal, measured, and confidential LPARs share one lifecycle model with different trust assumptions.
 
 ## 4. CECSIM-style co-design rule
 
-Jixia firmware and Jingjie/RVSoC-Sim are co-designed.
+Jixia firmware and the full-system simulator are co-designed.
 
-The simulator is not only a performance model. It is an executable architecture specification and firmware verification platform covering:
+The simulator is an executable architecture specification and firmware-verification platform covering CPU/SoC execution, firmware state machines, LPARs, I/O, management interactions, topology mismatches, semantic fault injection, trace, checkpoint/replay, coverage, and invariant checking across functional, timing, cycle, and RTL modes.
 
-- CPU and SoC execution;
-- firmware and service state machines;
-- LPARs and virtual I/O;
-- management-plane interactions;
-- PhysicalModelGraph versus FirmwarePlatformGraph mismatches;
-- precise event-driven fault injection;
-- trace, checkpoint, replay, coverage, and invariant checking;
-- fast functional, timing, cycle, and RTL co-simulation modes.
-
-Every major firmware interface should consider how Jingjie observes it, synchronizes with it, injects failures into it, and verifies recovery.
+Every major firmware interface must consider how the simulator observes it, synchronizes with it, injects failures, and verifies recovery.
 
 ## 5. Current implementation state
 
-Completed before the Jixia naming transition:
+Completed:
 
-- `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART, and `kernel_main`.
-- `M00-01`: minimal fatal M-mode trap entry using `mtvec`, `mcause`, `mepc`, and `mtval`.
+- `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
+- `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
+- build artifacts renamed from `archfw.*` to `jixia.*`.
+- executable implementation moved to semantic `microkernel/` paths.
+- low-level C ABI now enters freestanding C++ code under `jixia::microkernel`.
 
-Naming transition:
-
-- build artifacts: `archfw.*` -> `jixia.*`;
-- executable microkernel source: `kernel/` -> `mozi/`;
-- `kernel_main` -> `mozi_main`.
-
-Next milestone remains:
+Next milestone:
 
 ```text
 M00-02  Complete TrapFrame
@@ -111,64 +118,54 @@ M00-05  Per-hart state
 M00-06  Privilege transition
 ```
 
-Do not jump directly to Linux, migration, split-core, or memory encryption before the privilege/trap foundation is correct and testable.
+Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
 
-## 6. Repository scan protocol for a new conversation
+## 6. New-conversation scan protocol
 
 Before answering a Jixia/Firmware project question in a new chat:
 
-1. Inspect `Pedroaliu/Firmware` metadata, default branch, and latest commits.
-2. Read `README.md`.
-3. Read this `PROJECT_CONTEXT.md`.
-4. Read `docs/JIXIA_ARCHITECTURE_V0.2.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
-5. Inspect the current source tree and build files; code is newer than old chat summaries.
-6. Read relevant historical design records under `docs/`, including older `ARCHFW_*` documents when useful.
-7. Locate referenced PDFs in the current conversation or File Library by the titles recorded in `docs/JIXIA_PROJECT_SOURCES.md`.
-8. Verify which simulator repository is active before editing it; do not silently edit a similarly named repository.
+1. Inspect `Pedroaliu/Firmware`, its default branch, and latest commits.
+2. Read `PROJECT_CONTEXT.md` and `README.md`.
+3. Read `docs/JIXIA_ARCHITECTURE_V0.2.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
+4. Inspect current source paths, namespaces, build files, and milestone state.
+5. Read relevant historical `ARCHFW_*` documents when useful.
+6. Locate referenced PDFs through the current conversation or File Library using the source manifest.
+7. Confirm the active simulator repository before editing it.
 
-When repository state conflicts with conversational memory, repository state wins unless the user explicitly says the repository is stale.
+Repository state wins over remembered chat state unless the user explicitly says the repository is stale.
 
-## 7. Confirmed Git repositories
+## 7. Confirmed repositories
 
 ### Primary
 
 - `Pedroaliu/Firmware` — Jixia firmware platform; `main` is canonical.
 
-### Related user repositories
+### Related
 
-- `Pedroaliu/RVSoC-Sim-v2` — related newer simulator work; scan before assuming it is the active Jingjie implementation.
+- `Pedroaliu/RVSoC-Sim-v2` — related newer simulator work; confirm before treating it as active.
 - `Pedroaliu/archlab_rvsoc_sim` — earlier simulator repository.
-- `Pedroaliu/archlab-rvsoc-sim-t` — related simulator/timing experiment repository.
-- `Pedroaliu/archlab-virt` — separate KVM/virtualization study and useful mainstream comparison baseline.
-- `Pedroaliu/my-cs-arch-notes` — architecture notes library.
+- `Pedroaliu/archlab-rvsoc-sim-t` — related timing experiment.
+- `Pedroaliu/archlab-virt` — KVM/virtualization comparison project.
+- `Pedroaliu/my-cs-arch-notes` — architecture notes.
 
-### External source repositories
+### External source
 
-- `open-power/hostboot`, reference branch `release-fw1120` — IBM/OpenPOWER host firmware source reference.
+- `open-power/hostboot`, reference branch `release-fw1120`.
 
-The exact active Jingjie repository must be confirmed from the current task before writes. `Pedroaliu/Firmware` is never interchangeable with the simulator repositories.
+The Firmware repository is never interchangeable with similarly named simulator repositories.
 
-## 8. Decisions that should not be forgotten
+## 8. Decisions not to forget
 
-- Jixia is not another EDK II implementation and not another mini-KVM.
-- Native Linux/KVM remains a supported execution profile and comparison baseline.
-- LPAR is a first-class logical-machine contract, not merely `vCPU + RAM`.
-- Luban uses Linux endpoint drivers directly; Mozi manages platform control and ownership rather than reimplementing NVMe/NIC/RAID drivers.
-- ACPI and DT are generated views from Nuwa's filtered PlatformGraph.
-- Guigu is a cross-backend debug framework, not a simulator-only feature and not a production backdoor.
-- Confidential computing is a long-term requirement and must constrain debug, DMA, RAS, attestation, and migration designs now.
+- Jixia is not another EDK II implementation or mini-KVM.
+- Native Linux/KVM remains a supported profile and comparison baseline.
+- LPAR is a logical-machine contract, not merely `vCPU + RAM`.
+- The driver domain uses Linux endpoint drivers directly; host firmware manages platform control and ownership.
+- ACPI and DT are generated PlatformGraph views.
+- Dynamic debug is cross-backend engineering infrastructure, not a production backdoor.
+- Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now.
 - BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
+- Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
 
-## 9. Updating this file
+## 9. Maintenance
 
-Update this file whenever any of the following changes:
-
-- canonical component names;
-- primary or active repositories;
-- project direction;
-- completed milestone;
-- next milestone;
-- core reference sources;
-- trust model or execution profiles.
-
-This file is intentionally concise enough to scan at the start of every new project conversation.
+Update this file whenever canonical names, naming policy, repositories, direction, milestone state, core sources, execution profiles, or trust assumptions change.
