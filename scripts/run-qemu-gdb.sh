@@ -32,4 +32,4 @@ exec qemu-system-riscv64 \
     -serial stdio \
     -monitor none \
     -S \
-    -gdb "tcp::${GDB_PORT}"
+    -gdb "tcp:127.0.0.1:${GDB_PORT}"
