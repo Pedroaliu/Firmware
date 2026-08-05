@@ -11,7 +11,7 @@ void trap_fatal(uintptr_t cause, uintptr_t epc, uintptr_t tval)
     const uintptr_t cause_code = cause & ~interrupt_bit;
 
     uart_puts("\n");
-    uart_puts("[fatal trap]\n");
+    uart_puts("[mozi fatal trap]\n");
 
     uart_puts("kind      : ");
     if ((cause & interrupt_bit) != 0U)
@@ -43,5 +43,4 @@ void trap_fatal(uintptr_t cause, uintptr_t epc, uintptr_t tval)
     {
         __asm__ volatile("wfi");
     }
-
 }

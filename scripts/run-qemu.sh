@@ -8,11 +8,11 @@ readonly ROOT_DIR="$(
 )"
 
 readonly BUILD_DIR="${1:-build}"
-readonly FIRMWARE="${ROOT_DIR}/${BUILD_DIR}/archfw.bin"
+readonly FIRMWARE="${ROOT_DIR}/${BUILD_DIR}/jixia.bin"
 
 if [[ ! -f "${FIRMWARE}" ]]; then
     echo "Firmware image not found: ${FIRMWARE}" >&2
-    echo "Build ArchFW before running QEMU." >&2
+    echo "Build Jixia firmware before running QEMU." >&2
     exit 1
 fi
 

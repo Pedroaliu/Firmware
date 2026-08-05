@@ -4,12 +4,12 @@
     .type _start, @function
 
 /*
- * QEMU virt firmware entry:
+ * Jixia QEMU virt entry:
  *
  *   a0 = hart ID
  *   a1 = device tree blob address
  *
- * M00 currently allows only hart 0 to execute the boot kernel.
+ * M00 currently allows only hart 0 to execute the Mozi microkernel.
  */
 _start:
     /*
@@ -18,8 +18,8 @@ _start:
      *
      * mstatus.MIE is bit 3.
      */
-     csrci mstatus, 8
-    ; csrw  mie, zero
+    csrci mstatus, 8
+    csrw  mie, zero
 
     /*
      * Park all secondary harts.
@@ -54,13 +54,6 @@ _start:
      *
      * t0 = current address
      * t1 = end address
-     *
-     * Equivalent C code:
-     *
-     * while (t0 < t1) {
-     *     *(uint64_t *)t0 = 0;
-     *     t0 += 8;
-     * }
      */
     la t0, __bss_start
     la t1, __bss_end
@@ -87,13 +80,10 @@ _start:
      * a0 = hart ID
      * a1 = device tree address
      */
-    call kernel_main
+    call mozi_main
 
     /*
-     * kernel_main must not return.
-     *
-     * If it does return unexpectedly, park the boot hart.
-     * _start has no caller, so executing ret would be invalid.
+     * mozi_main must not return.
      */
 .Lboot_park:
     wfi
