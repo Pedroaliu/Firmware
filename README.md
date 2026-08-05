@@ -77,7 +77,7 @@ Prerequisites:
 
 ```bash
 cmake -S . -B build \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64-gcc.cmake
+  -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64-unknown-elf.cmake
 
 cmake --build build
 ./scripts/run-qemu.sh
