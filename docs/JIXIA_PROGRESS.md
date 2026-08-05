@@ -25,12 +25,13 @@
 | Milestone | Status | Evidence | Notes |
 |---|---|---|---|
 | M00-00 Minimal RV64 boot, stack, BSS, UART | DONE | `c30c0405b388a0fba4c528856236ff02267f1a77` | QEMU virt reset entry and initial firmware output |
-| M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, and `mtval`; non-resumable |
+| M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, and `mtval`; non-resumable; revalidated on 2026-08-05 after freestanding C++ compatibility fix |
 | Architecture v0.1 | DONE | `1fe8fbcf16a477fc921e7b5aac7be066d13c65b2` | original ArchFW architecture record |
 | LPAR/CECSIM co-design direction | DONE | `9f5422939fa5501811135170a1c8633ef18842f3` | long-term firmware-native partition and simulator direction |
 | Jixia naming and persistent context | DONE | `6c6769adb8f1aa9c6e1b6f4afb9d3800b5d22433` | Jixia identity and project memory established |
 | Semantic paths and `jixia::*` namespaces | DONE | `df8bc2d6bd32d1b13b659e5e33629d24c1488bc2` | C++ namespace boundary, semantic source paths, architecture image |
 | Solo development roadmap | DONE | `1d9e1cfb9be782b5e7ad44d21b41600f021fd597` | single-threaded project execution and feature gates |
+| Freestanding C++ compatibility fix | DONE | `7d8a66f4dbac12e6196d0fbbf3a28932647bbd0e` | `<stdint.h>`/`uintptr_t` source fix plus CMake compile-option cleanup; build and QEMU validated on the user's workstation |
 | M00-02 Complete RV64 TrapFrame | ACTIVE | pending | current unique primary task |
 | M00-03 Recoverable trap and `mret` | NEXT | pending | begins only after M00-02 is recorded DONE |
 | M00-04 Timer interrupt | NEXT | pending | depends on stable trap entry/exit |
@@ -126,6 +127,17 @@ Then update:
 4. relevant design and learning notes.
 
 ## Progress history
+
+### 2026-08-05 — freestanding C++ compatibility and QEMU revalidation
+
+- Status: DONE
+- Source fix: replace `<cstdint>`/`std::uintptr_t` with `<stdint.h>`/`uintptr_t` in `firmware_main.cpp` and `trap.cpp`.
+- Build result: passed on the user's Ubuntu workstation with `riscv64-unknown-elf-gcc/g++`.
+- Run command: `./scripts/run-qemu.sh`.
+- QEMU result: Jixia entered the microkernel and intentionally executed a 32-bit `EBREAK`.
+- Observed state: `mcause=3`, `mepc=0x00000000800000ee`, `mtval=0`, confirming the expected breakpoint exception path.
+- Decision: the two-source-file change is the necessary and sufficient root-cause fix for the missing `<cstdint>` header. The CMake change in the merged build fix is retained as an independent compile-option cleanup, not as a prerequisite for solving the header error.
+- Limitation: the trap path remains fatal and non-resumable; M00-02 remains ACTIVE.
 
 ### 2026-08-05 — solo development process established
 
