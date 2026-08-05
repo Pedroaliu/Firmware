@@ -1,51 +1,82 @@
-# ArchFW Firmware Architecture
+# ArchFW M00: QEMU UART Bootstrap
 
-This branch develops ArchFW as a capability-protected firmware OS for heterogeneous cloud-server platforms.
+This branch contains the first executable ArchFW milestone: a tiny
+RISC-V M-mode microkernel bootstrap for QEMU `virt`.
 
-## Canonical architecture
+## What M00 currently does
 
-Start here:
+1. starts at physical address `0x80000000`;
+2. keeps hart 0 and parks secondary harts;
+3. establishes `gp` and a 64 KiB boot stack;
+4. clears `.bss`;
+5. installs a minimal M-mode trap vector;
+6. initializes QEMU's ns16550 UART at `0x10000000`;
+7. prints the boot banner and enters `wfi` idle.
 
-- [ArchFW Microkernel and Firmware Architecture v0.2](docs/ARCHFW_MICROKERNEL_FIRMWARE_ARCHITECTURE_V0.2.md)
+This is intentionally not yet a complete seL4-like kernel. There are no
+TCBs, scheduler, capabilities, endpoints or VSpaces in this commit. The
+purpose is to freeze and verify the machine-entry contract before adding
+kernel objects.
 
-That document freezes the current integration of:
+## Build dependencies
 
-- a seL4-inspired minimal object-capability kernel;
-- a Hostboot-inspired istep, Targeting, HWP and reconfiguration model;
-- NXP-inspired resource domains and power/clock/reset ownership;
-- isolated hardware services and remote Agents;
-- independent RAS diagnosis;
-- EDK II, EFI memory map and ACPI handoff;
-- a QEMU implementation plan through M00-M04.
-
-## Supporting design documents
-
-### Platform and configuration
-
-- [Platform Unification Principle](docs/ARCHFW_PLATFORM_UNIFICATION_PRINCIPLE.md)
-- [Configuration Model v0.1](docs/ARCHFW_CONFIG_MODEL_V0.1.md)
-- [Desired State and Reconciliation Model v0.1](docs/ARCHFW_DESIRED_STATE_AND_RECONCILIATION_MODEL_V0.1.md)
-- [Firmware State Store and Migration v0.1](docs/ARCHFW_FIRMWARE_STATE_STORE_AND_MIGRATION_V0.1.md)
-
-### Agents and ownership
-
-- [Agent Protocol v0.1](docs/ARCHFW_AGENT_PROTOCOL_V0.1.md)
-
-### RAS
-
-- [Distributed RAS Design v0.1](docs/ARCHFW_RAS_DESIGN_V0.1.md)
-- [Hybrid RAS Architecture v0.1](docs/ARCHFW_HYBRID_RAS_ARCHITECTURE_V0.1.md)
-- [RISC-V RAS Architecture v0.2](docs/ARCHFW_RISCV_RAS_ARCHITECTURE_V0.2.md)
-- [POWER PRDF/FIR/Attention Routing v0.1](docs/ARCHFW_POWER_PRDF_FIR_ATTENTION_ROUTING_V0.1.md)
-
-## Implementation order
+Preferred LLVM toolchain:
 
 ```text
-M00  microkernel bootstrap and isolated service restart
-M01  PlatformGraph, Targeting and transactional istep engine
-M02  hardware services, Agent protocol, ownership and reconfiguration
-M03  EDK II, EFI memory map, ACPI and Linux boot
-M04  independent RAS processor, checkstop and next-boot recovery
+clang 17+
+ld.lld
+llvm-objcopy
+qemu-system-riscv64
 ```
 
-The v0.2 canonical document controls when older v0.1 notes disagree with it. Older notes remain as focused design studies and will be folded forward as implementation begins.
+## Build and run
+
+```sh
+make
+make run
+```
+
+Equivalent explicit QEMU command:
+
+```sh
+qemu-system-riscv64 \
+  -machine virt \
+  -m 128M \
+  -smp 1 \
+  -nographic \
+  -bios build/qemu-virt/archfw.bin
+```
+
+Exit QEMU with `Ctrl-a x`.
+
+Expected output begins with:
+
+```text
+ArchFW microkernel M00
+======================
+[archfw] phase    : KERNEL_BOOTSTRAP
+[archfw] platform : qemu-riscv64-virt
+...
+[archfw] status   : M00 UART bootstrap complete
+```
+
+## Source layout
+
+```text
+arch/riscv64/       reset entry and trap entry
+drivers/uart/       ns16550 polling console
+include/            kernel and platform interfaces
+kernel/             first C entry and trap panic
+linker/              QEMU virt memory layout
+scripts/             run helpers
+docs/                milestone design notes
+```
+
+## Next implementation steps
+
+M00.1 adds `BootInfo`, a fixed early allocator and typed `MemoryRegion`
+records. M00.2 adds the first `Thread`, idle thread and event-based kernel
+entry. Capability spaces and Endpoint/Notification objects follow only
+after those invariants are covered by host-side tests.
+
+The full architecture study remains in branch `archfw-architecture-v0.1`.
