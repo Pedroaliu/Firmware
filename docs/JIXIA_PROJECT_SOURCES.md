@@ -15,7 +15,7 @@ When sources disagree, use this order unless the user explicitly overrides it:
 3. Current user instructions in the active project conversation.
 4. Current state of related user repositories after scanning their default branches and recent commits.
 5. Primary specifications, source repositories, books, and papers.
-6. Historical `ARCHFW_*` design records.
+6. Historical `ARCHFW_*` and superseded Jixia design records.
 7. Old chat summaries or model memory.
 
 Repository state beats remembered chat state when the repository is newer.
@@ -26,7 +26,8 @@ Repository state beats remembered chat state when the repository is newer.
 
 - Repository: `Pedroaliu/Firmware`
 - Branch: `main`
-- Role: Jixia firmware platform, Mozi, future Pangu/Nuwa/ArchHV/Luban/Yuange/RAS/security contracts, target-side tests, and QEMU functional prototypes.
+- Role: Jixia firmware platform, semantic `boot/`, `microkernel/`, `platform/model/`, `hypervisor/`, service, RAS, security, simulator-interface modules, target-side tests, and QEMU functional prototypes.
+- Naming rule: Jixia is the project brand; Chinese cultural names are implementation codenames; source paths and C++ namespaces use technical English meaning.
 
 ### Related simulator and virtualization repositories
 
@@ -65,12 +66,18 @@ Read in this order:
 
 1. `PROJECT_CONTEXT.md`
 2. `README.md`
-3. `docs/JIXIA_ARCHITECTURE_V0.2.md`
+3. `docs/JIXIA_ARCHITECTURE_V0.3.md`
 4. `docs/JIXIA_PROJECT_SOURCES.md`
-5. historical `docs/ARCHFW_LPAR_CECSIM_CODESIGN_DIRECTION_V0.1.md`
-6. historical `docs/ARCHFW_ARCHITECTURE_V0.1.md`
+5. `docs/images/jixia-firmware-architecture.svg`
+6. historical `docs/JIXIA_ARCHITECTURE_V0.2.md`
+7. historical `docs/ARCHFW_LPAR_CECSIM_CODESIGN_DIRECTION_V0.1.md`
+8. historical `docs/ARCHFW_ARCHITECTURE_V0.1.md`
 
-The `ARCHFW_*` files preserve the design evolution. Their old names are not the current component names.
+The current naming policy is authoritative:
+
+- cultural names are architecture and implementation codenames;
+- directories, public symbols, types, schemas, protocols, and C++ namespaces use semantic English names;
+- assembly and cross-language boundaries use minimal `jixia_` C ABI symbols.
 
 ## 4. IBM POWER / LPAR / RAS core references
 
@@ -89,7 +96,7 @@ These are architecture references, not requirements to copy POWER instruction en
 
 - **System z9 CECSIM firmware simulation paper** — full-system firmware execution before hardware, LPAR and I/O models, management scripts, SIMCALL, dynamic configuration, target tests, injection, regression, and coverage.
 - POWER5 verification material — architectural invariants and coverage-driven verification.
-- The Jixia rule derived from these sources: Jingjie and firmware must be co-designed; the simulator is an executable architecture specification, not a late compatibility wrapper.
+- The Jixia rule derived from these sources: firmware and the full-system simulator must be co-designed; the simulator is an executable architecture specification, not a late compatibility wrapper.
 
 ## 6. Firmware security and trusted-computing references
 
@@ -164,9 +171,9 @@ Uploaded files include:
 
 Use these as supporting educational material, not automatically as canonical platform specifications.
 
-## 9. Planned source areas by Jixia subsystem
+## 9. Planned source areas by technical subsystem
 
-### Pangu / Mozi
+### Boot and microkernel — codenames Pangu / Mozi
 
 - RISC-V privileged specification
 - OpenSBI startup/trap patterns
@@ -174,7 +181,7 @@ Use these as supporting educational material, not automatically as canonical pla
 - seL4/L4/QNX/Zircon mechanism references
 - secure firmware root-of-trust and recovery references
 
-### Nuwa
+### Platform model — codename Nuwa
 
 - Hostboot targeting
 - CUE
@@ -182,7 +189,7 @@ Use these as supporting educational material, not automatically as canonical pla
 - hardware graph/schema systems
 - CECSIM dynamic configuration
 
-### ArchHV / Jiuzhou
+### Hypervisor and logical partitions — ArchHV / Jiuzhou
 
 - POWER5–POWER8 LPAR papers
 - RISC-V H extension
@@ -190,21 +197,21 @@ Use these as supporting educational material, not automatically as canonical pla
 - RISC-V IOMMU
 - KVM/Xen as comparison baselines
 
-### Luban / Yuange
+### Driver domain and firmware personalities — codenames Luban / Yuange
 
 - LinuxBoot and Petitboot
 - Linux PCI/NVMe/SCSI/RAID/network drivers
 - VFIO/IOMMU patterns
 - UEFI, ACPI, SBI, DT, U-Boot/FIT
 
-### Bianque / Taiyi
+### RAS diagnosis and recovery — codenames Bianque / Taiyi
 
 - POWER RAS papers and Hostboot diagnostics
 - server RAS specifications
 - PCIe AER/DPC, memory RAS, CPU RAS
 - NIST SP800-193 firmware resiliency
 
-### Guigu / Jingjie
+### Dynamic debug and simulator interface — codenames Guigu / Jingjie
 
 - CECSIM
 - POWER5 verification
@@ -239,4 +246,5 @@ Update this manifest whenever:
 - an external dependency is pinned;
 - a new paper materially changes the architecture;
 - an uploaded source is normalized to a full bibliography;
-- a source is deprecated or superseded.
+- a source is deprecated or superseded;
+- the canonical naming or namespace policy changes.
