@@ -147,8 +147,8 @@ Placeholder module directories define ownership and planned interfaces; they do 
 Every new project conversation or coding session begins with:
 
 1. [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md)
-2. [`docs/JIXIA_ARCHITECTURE_V0.2.md`](docs/JIXIA_ARCHITECTURE_V0.2.md)
+2. [`docs/JIXIA_ARCHITECTURE_V0.3.md`](docs/JIXIA_ARCHITECTURE_V0.3.md)
 3. [`docs/JIXIA_PROJECT_SOURCES.md`](docs/JIXIA_PROJECT_SOURCES.md)
 4. current code and recent commits
 
-Older `docs/ARCHFW_*` files remain historical design records. Jixia is canonical; cultural component names are codenames, while code uses semantic English names and `jixia::*` namespaces.
+Older `docs/ARCHFW_*` and `JIXIA_ARCHITECTURE_V0.2.md` files remain historical design records. Jixia is canonical; cultural component names are codenames, while code uses semantic English names and `jixia::*` namespaces.
