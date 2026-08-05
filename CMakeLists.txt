@@ -3,12 +3,16 @@ cmake_minimum_required(VERSION 3.20)
 project(
     jixia_firmware
     VERSION 0.0.1
-    LANGUAGES C ASM
+    LANGUAGES C CXX ASM
 )
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr
@@ -36,10 +40,10 @@ set(JIXIA_COMMON_FLAGS
 add_executable(
     jixia.elf
 
-    mozi/arch/riscv/start.S
-    mozi/arch/riscv/trap.S
-    mozi/core/mozi_main.c
-    mozi/core/trap.c
+    microkernel/arch/riscv/start.S
+    microkernel/arch/riscv/trap.S
+    microkernel/core/firmware_main.cpp
+    microkernel/core/trap.cpp
     platform/qemu_virt/uart.c
 )
 
@@ -54,6 +58,10 @@ target_compile_options(
     jixia.elf
     PRIVATE
         ${JIXIA_COMMON_FLAGS}
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-use-cxa-atexit>
 )
 
 target_link_options(
