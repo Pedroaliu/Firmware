@@ -4,6 +4,14 @@
 
 > 稷下容百家，墨子立其规；女娲构其形，鲁班驭百器。
 
+<p align="center">
+  <a href="docs/images/jixia-firmware-architecture.svg">
+    <img src="docs/images/jixia-firmware-architecture.svg" alt="Jixia firmware platform architecture overview" width="100%">
+  </a>
+</p>
+
+<p align="center"><em>Jixia firmware platform overview — click the diagram to open the full-size vector image.</em></p>
+
 Jixia is a learning-driven server platform project. It studies what a machine looks like when firmware, logical partitions, RAS, trusted/confidential computing, and a full-system simulator are designed together from the first instruction.
 
 It is not an attempt to clone IBM PowerVM, EDK II, or KVM. Native Linux/KVM remains a supported execution profile and the mainstream comparison baseline.
