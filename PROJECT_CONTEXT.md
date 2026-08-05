@@ -8,7 +8,8 @@
 
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
-- **Canonical branch:** `main`
+- **Stable integration branch:** `main`
+- **Current progress branch:** `roadmap/solo-development`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -16,11 +17,38 @@ Jixia studies what a machine looks like when firmware, logical partitions, RAS, 
 
 IBM POWER/PowerVM/LPAR and System z/CECSIM are studied as alternative systems perspectives to the dominant x86/Arm + Linux/KVM path. The goal is better trade-off reasoning, not a claim of universal superiority.
 
-## 2. Naming policy
+## 2. Development mode
+
+The project currently has one human developer working with ChatGPT as a research, teaching, architecture, review, and debugging partner.
+
+The project is intentionally single-threaded:
+
+```text
+NOW      exactly one primary milestone
+NEXT     at most three ordered milestones
+BACKLOG  accepted later work
+FROZEN   work blocked by architectural prerequisites
+```
+
+The canonical execution plan is `docs/JIXIA_SOLO_ROADMAP.md`. The canonical live status is `docs/JIXIA_PROGRESS.md`.
+
+When a milestone is completed, the progress ledger records:
+
+- commit or pull request;
+- test command and result;
+- what was learned;
+- design decisions;
+- known limitations;
+- documentation changes;
+- the next ACTIVE milestone.
+
+A milestone is not complete merely because code exists.
+
+## 3. Naming policy
 
 Jixia is the project and product brand.
 
-Chinese cultural names are **implementation codenames**, not source-code vocabulary. They may appear in architecture diagrams, releases, presentations, banners, and module descriptions. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
+Chinese cultural names are implementation codenames, not source-code vocabulary. They may appear in architecture diagrams, releases, presentations, banners, and module descriptions. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
 
 | Codename | Technical responsibility | Semantic code location / namespace |
 |---|---|---|
@@ -46,9 +74,9 @@ For confidential computing, keep the technical name **Confidential LPAR** until 
 - Minimum reset/assembly boundaries remain C-compatible.
 - Cross-language symbols use stable `jixia_` C ABI names.
 - Freestanding implementation code uses C++ nested namespaces.
-- Do not encode codenames into public symbol names, file paths, data schemas, or protocols.
+- Do not encode codenames into public symbols, file paths, data schemas, or protocols.
 
-Current examples:
+Examples:
 
 ```cpp
 namespace jixia::microkernel {}
@@ -59,9 +87,9 @@ namespace jixia::ras::diagnosis {}
 namespace jixia::debug::replay {}
 ```
 
-## 3. Architectural baseline
+## 4. Architectural baseline
 
-Jixia supports three execution profiles:
+Jixia retains three long-term execution profiles:
 
 ```text
 NATIVE_HOST
@@ -90,7 +118,7 @@ Core principles:
 10. Protection, detection, and recovery are designed separately.
 11. Normal, measured, and confidential LPARs share one lifecycle model with different trust assumptions.
 
-## 4. CECSIM-style co-design rule
+## 5. CECSIM-style co-design rule
 
 Jixia firmware and the full-system simulator are co-designed.
 
@@ -98,7 +126,7 @@ The simulator is an executable architecture specification and firmware-verificat
 
 Every major firmware interface must consider how the simulator observes it, synchronizes with it, injects failures, and verifies recovery.
 
-## 5. Current implementation state
+## 6. Current implementation state
 
 Completed:
 
@@ -106,39 +134,56 @@ Completed:
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
 - build artifacts renamed from `archfw.*` to `jixia.*`.
 - executable implementation moved to semantic `microkernel/` paths.
-- low-level C ABI now enters freestanding C++ code under `jixia::microkernel`.
+- low-level C ABI enters freestanding C++ code under `jixia::microkernel`.
+- architecture overview and persistent project/source records established.
+- solo-development roadmap and progress-recording process established.
 
-Next milestone:
+Current queue:
 
 ```text
-M00-02  Complete TrapFrame
-M00-03  Recoverable trap and mret
-M00-04  Timer interrupt
-M00-05  Per-hart state
-M00-06  Privilege transition
+ACTIVE  M00-02 Complete RV64 TrapFrame
+NEXT    M00-03 Recoverable trap and mret
+NEXT    M00-04 Timer interrupt
+NEXT    M00-05 Per-hart state and stacks
 ```
 
 Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
 
-## 6. New-conversation scan protocol
+## 7. Frozen implementation scope
+
+The following remain long-term architecture topics but are not current implementation work:
+
+- ArchHV and LPAR runtime;
+- HS/VS execution and G-stage translation;
+- virtual interrupt and virtual I/O;
+- Service LPAR;
+- confidential LPAR runtime;
+- secure migration.
+
+They remain frozen until the Jingjie simulator prerequisites in `docs/JIXIA_SOLO_ROADMAP.md` are satisfied.
+
+## 8. New-conversation scan protocol
 
 Before answering a Jixia/Firmware project question in a new chat:
 
-1. Inspect `Pedroaliu/Firmware`, its default branch, and latest commits.
-2. Read `PROJECT_CONTEXT.md` and `README.md`.
-3. Read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
-4. Inspect current source paths, namespaces, build files, and milestone state.
-5. Read relevant historical `ARCHFW_*` documents when useful.
-6. Locate referenced PDFs through the current conversation or File Library using the source manifest.
-7. Confirm the active simulator repository before editing it.
+1. inspect `Pedroaliu/Firmware`, its default branch, progress branch, and latest commits;
+2. read this file;
+3. read `docs/JIXIA_PROGRESS.md` to identify the single ACTIVE milestone;
+4. read `docs/JIXIA_SOLO_ROADMAP.md` for phase order and gates;
+5. read `README.md`;
+6. read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`;
+7. inspect current source paths, namespaces, build files, and tests;
+8. read relevant historical `ARCHFW_*` documents when useful;
+9. locate referenced PDFs through the active conversation or File Library;
+10. confirm the active simulator repository before editing it.
 
 Repository state wins over remembered chat state unless the user explicitly says the repository is stale.
 
-## 7. Confirmed repositories
+## 9. Confirmed repositories
 
 ### Primary
 
-- `Pedroaliu/Firmware` — Jixia firmware platform; `main` is canonical.
+- `Pedroaliu/Firmware` — Jixia firmware platform.
 
 ### Related
 
@@ -154,18 +199,21 @@ Repository state wins over remembered chat state unless the user explicitly says
 
 The Firmware repository is never interchangeable with similarly named simulator repositories.
 
-## 8. Decisions not to forget
+## 10. Decisions not to forget
 
 - Jixia is not another EDK II implementation or mini-KVM.
-- Native Linux/KVM remains a supported profile and comparison baseline.
-- LPAR is a logical-machine contract, not merely `vCPU + RAM`.
+- Native Linux/KVM remains a supported future profile and comparison baseline.
+- LPAR is a logical-machine contract, not merely `vCPU + RAM`, but its implementation is deferred until simulator prerequisites exist.
 - The driver domain uses Linux endpoint drivers directly; host firmware manages platform control and ownership.
 - ACPI and DT are generated PlatformGraph views.
 - Dynamic debug is cross-backend engineering infrastructure, not a production backdoor.
-- Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now.
+- Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now, even though its runtime is deferred.
 - BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
 - Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
+- One active milestone at a time is a deliberate learning and quality strategy.
 
-## 9. Maintenance
+## 11. Maintenance
 
-Update this file whenever canonical names, naming policy, repositories, direction, milestone state, core sources, execution profiles, or trust assumptions change.
+Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, or trust assumptions change.
+
+Routine test results and milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
