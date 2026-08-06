@@ -2,6 +2,8 @@
 
 #include "uart.h"
 
+extern "C" [[noreturn]] void jixia_trap_frame_test();
+
 namespace jixia::microkernel {
 
 [[noreturn]] void main(uintptr_t hart_id, uintptr_t dtb_address)
@@ -17,15 +19,9 @@ namespace jixia::microkernel {
     uart_puts("\n");
 
     uart_puts("microkernel : entered (codename: Mozi)\n");
-    uart_puts("trap test   : breakpoint\n");
+    uart_puts("trap test   : complete integer TrapFrame\n");
 
-    /* Emit an explicit 32-bit EBREAK rather than C.EBREAK. */
-    __asm__ volatile(".word 0x00100073");
-
-    for (;;)
-    {
-        __asm__ volatile("wfi");
-    }
+    jixia_trap_frame_test();
 }
 
 } // namespace jixia::microkernel
