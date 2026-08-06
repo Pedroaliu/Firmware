@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "uart.h"
 
@@ -10,14 +11,14 @@ void jixia_trap_frame_test_finish(
 
 namespace jixia::microkernel::trap {
 
+using jixia::arch::riscv::TrapCause;
 using jixia::arch::riscv::TrapFrame;
+using jixia::arch::riscv::Xlen;
 
 [[noreturn]] void fatal(const TrapFrame& frame)
 {
-    constexpr uintptr_t interrupt_bit =
-        uintptr_t{1} << ((sizeof(uintptr_t) * 8U) - 1U);
-
-    const uintptr_t cause_code = frame.mcause & ~interrupt_bit;
+    const TrapCause cause{frame.mcause};
+    const Xlen cause_code = cause.code();
 
     uart_puts("\n");
     uart_puts("[Jixia][Microkernel][fatal trap]\n");
@@ -27,10 +28,7 @@ using jixia::arch::riscv::TrapFrame;
     uart_puts("\n");
 
     uart_puts("kind      : ");
-    uart_puts(
-        (frame.mcause & interrupt_bit) != 0U
-            ? "interrupt\n"
-            : "exception\n");
+    uart_puts(cause.is_interrupt() ? "interrupt\n" : "exception\n");
 
     uart_puts("mstatus   : ");
     uart_put_hex_uintptr(frame.mstatus);
