@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "microkernel/arch/riscv/instruction_decode.h"
 #include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "uart.h"
@@ -11,9 +12,13 @@ void jixia_trap_frame_test_finish(
 
 namespace jixia::microkernel::trap {
 
+using jixia::arch::riscv::BreakpointDecode;
+using jixia::arch::riscv::ExceptionCode;
 using jixia::arch::riscv::TrapCause;
 using jixia::arch::riscv::TrapFrame;
 using jixia::arch::riscv::Xlen;
+using jixia::arch::riscv::decode_breakpoint_at;
+using jixia::arch::riscv::instruction_length_bytes;
 
 [[noreturn]] void fatal(const TrapFrame& frame)
 {
@@ -64,6 +69,52 @@ using jixia::arch::riscv::Xlen;
     }
 }
 
+[[nodiscard]]
+bool try_recover_breakpoint(TrapFrame& frame)
+{
+    const TrapCause cause{frame.mcause};
+
+    /*
+     * Recovery is an explicit whitelist.  M00-03 accepts only a synchronous
+     * breakpoint exception; interrupts and every other exception remain
+     * fatal until their own handling policy is implemented.
+     */
+    if (!cause.is_exception(ExceptionCode::breakpoint))
+    {
+        return false;
+    }
+
+    /*
+     * mcause code 3 can also describe hardware breakpoints/watchpoints.
+     * Confirm that mepc really points at EBREAK or C.EBREAK before advancing
+     * the saved resume PC.
+     */
+    const BreakpointDecode decoded =
+        decode_breakpoint_at(frame.mepc);
+
+    if (!decoded.recognized())
+    {
+        return false;
+    }
+
+    /*
+     * EBREAK and C.EBREAK leave mepc pointing at themselves.  trap.S later
+     * writes this modified value back to the mepc CSR before executing mret.
+     */
+    frame.mepc += instruction_length_bytes(decoded.length);
+    return true;
+}
+
+void dispatch(TrapFrame& frame)
+{
+    if (try_recover_breakpoint(frame))
+    {
+        return;
+    }
+
+    fatal(frame);
+}
+
 } // namespace jixia::microkernel::trap
 
 extern "C"
@@ -74,5 +125,5 @@ void jixia_trap_dispatch(jixia::arch::riscv::TrapFrame* frame)
         jixia_trap_frame_test_finish(frame);
     }
 
-    jixia::microkernel::trap::fatal(*frame);
+    jixia::microkernel::trap::dispatch(*frame);
 }
