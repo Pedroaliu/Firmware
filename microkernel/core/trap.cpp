@@ -3,6 +3,11 @@
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "uart.h"
 
+extern "C" int jixia_trap_frame_test_is_active();
+extern "C" [[noreturn]]
+void jixia_trap_frame_test_finish(
+    jixia::arch::riscv::TrapFrame* frame);
+
 namespace jixia::microkernel::trap {
 
 using jixia::arch::riscv::TrapFrame;
@@ -66,5 +71,10 @@ using jixia::arch::riscv::TrapFrame;
 extern "C"
 void jixia_trap_dispatch(jixia::arch::riscv::TrapFrame* frame)
 {
+    if (jixia_trap_frame_test_is_active() != 0)
+    {
+        jixia_trap_frame_test_finish(frame);
+    }
+
     jixia::microkernel::trap::fatal(*frame);
 }
