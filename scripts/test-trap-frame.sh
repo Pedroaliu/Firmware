@@ -6,12 +6,49 @@ readonly ROOT_DIR="$(
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
     pwd
 )"
+readonly DEFAULT_BUILD_PATH="${ROOT_DIR}/build/clion-debug"
+readonly TIMEOUT_SECONDS="${JIXIA_QEMU_TIMEOUT_SECONDS:-3}"
 
-readonly BUILD_DIR="${1:-build}"
-readonly BUILD_PATH="${ROOT_DIR}/${BUILD_DIR}"
+resolve_build_path()
+{
+    if [[ $# -eq 0 || -z "${1}" ]]; then
+        printf '%s\n' "${DEFAULT_BUILD_PATH}"
+        return
+    fi
+
+    local requested="${1}"
+    local candidate
+
+    if [[ "${requested}" = /* ]]; then
+        candidate="${requested}"
+        if [[ -f "${candidate}/CMakeCache.txt" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    else
+        for candidate in \
+            "${ROOT_DIR}/${requested}" \
+            "${ROOT_DIR}/build/${requested}"
+        do
+            if [[ -f "${candidate}/CMakeCache.txt" ]]; then
+                printf '%s\n' "${candidate}"
+                return
+            fi
+        done
+    fi
+
+    echo "Configured build directory not found: ${requested}" >&2
+    echo "Expected a directory containing CMakeCache.txt." >&2
+    echo "Examples:" >&2
+    echo "  bash scripts/test-trap-frame.sh" >&2
+    echo "  bash scripts/test-trap-frame.sh build/clion-debug" >&2
+    echo "  bash scripts/test-trap-frame.sh clion-debug" >&2
+    exit 2
+}
+
+readonly BUILD_PATH="$(resolve_build_path "${1:-}")"
 readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
 readonly LOG_FILE="${BUILD_PATH}/trap-frame-test.log"
-readonly TIMEOUT_SECONDS="${JIXIA_QEMU_TIMEOUT_SECONDS:-3}"
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
