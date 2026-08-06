@@ -51,7 +51,8 @@
 #ifndef __ASSEMBLER__
 
 #include <stddef.h>
-#include <stdint.h>
+
+#include "microkernel/arch/riscv/isa.h"
 
 namespace jixia::arch::riscv {
 
@@ -60,23 +61,23 @@ struct alignas(JIXIA_TRAP_FRAME_ALIGNMENT) TrapFrame {
      * General-purpose registers indexed by architectural register number.
      * x[0] is explicitly written as zero by the entry path.
      */
-    uintptr_t x[32];
+    Xlen x[32];
 
-    uintptr_t mstatus;
-    uintptr_t mepc;
-    uintptr_t mcause;
-    uintptr_t mtval;
+    Xlen mstatus;
+    Xlen mepc;
+    Xlen mcause;
+    Xlen mtval;
 };
 
-static_assert(sizeof(uintptr_t) == 8);
+static_assert(sizeof(Xlen) == 8U);
 static_assert(alignof(TrapFrame) == JIXIA_TRAP_FRAME_ALIGNMENT);
 static_assert(sizeof(TrapFrame) == JIXIA_TRAP_FRAME_SIZE);
 static_assert(
     (JIXIA_TRAP_FRAME_SIZE % JIXIA_TRAP_FRAME_ALIGNMENT) == 0);
 
-#define JIXIA_ASSERT_TRAP_X_OFFSET(index)                         \
-    static_assert(                                                \
-        offsetof(TrapFrame, x) + (sizeof(uintptr_t) * (index)) == \
+#define JIXIA_ASSERT_TRAP_X_OFFSET(index)               \
+    static_assert(                                      \
+        offsetof(TrapFrame, x) + (sizeof(Xlen) * (index)) == \
         JIXIA_TRAP_X##index##_OFFSET)
 
 JIXIA_ASSERT_TRAP_X_OFFSET(0);
