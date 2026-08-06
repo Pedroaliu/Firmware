@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly ROOT_DIR="$(
+    cd "$(dirname "${BASH_SOURCE[0]}")/.."
+    pwd
+)"
+
+readonly BUILD_DIR="${1:-build}"
+readonly BUILD_PATH="${ROOT_DIR}/${BUILD_DIR}"
+readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
+readonly LOG_FILE="${BUILD_PATH}/recoverable-trap-test.log"
+readonly TIMEOUT_SECONDS="${JIXIA_QEMU_TIMEOUT_SECONDS:-3}"
+
+cmake --build "${BUILD_PATH}" --target jixia.elf
+
+if [[ ! -f "${FIRMWARE}" ]]; then
+    echo "Firmware image not found: ${FIRMWARE}" >&2
+    exit 1
+fi
+
+set +e
+timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
+    qemu-system-riscv64 \
+        -machine virt \
+        -cpu rv64 \
+        -m 128M \
+        -smp 1 \
+        -bios "${FIRMWARE}" \
+        -display none \
+        -serial stdio \
+        -monitor none \
+        >"${LOG_FILE}" 2>&1
+readonly QEMU_STATUS=$?
+set -e
+
+cat "${LOG_FILE}"
+
+if [[ ${QEMU_STATUS} -ne 124 ]]; then
+    echo "Recoverable trap test: unexpected QEMU status ${QEMU_STATUS}" >&2
+    exit 1
+fi
+
+if grep -Fq "[Jixia][Microkernel][fatal trap]" "${LOG_FILE}"; then
+    echo "Recoverable trap test: fatal trap observed" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "standard   : resumed after 32-bit EBREAK" "${LOG_FILE}"; then
+    echo "Recoverable trap test: standard EBREAK did not resume" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "compressed : resumed after 16-bit C.EBREAK" "${LOG_FILE}"; then
+    echo "Recoverable trap test: C.EBREAK did not resume" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "RECOVERABLE_TRAP_TEST: PASS" "${LOG_FILE}"; then
+    echo "Recoverable trap test: PASS marker not found" >&2
+    exit 1
+fi
+
+if grep -Fq "TRAP_FRAME_TEST: FAIL" "${LOG_FILE}"; then
+    echo "TrapFrame regression: FAIL" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "TRAP_FRAME_TEST: PASS" "${LOG_FILE}"; then
+    echo "TrapFrame regression: PASS marker not found" >&2
+    exit 1
+fi
+
+echo "Recoverable trap test: PASS"
