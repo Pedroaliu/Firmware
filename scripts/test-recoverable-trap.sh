@@ -48,7 +48,9 @@ resolve_build_path()
 
 readonly BUILD_PATH="$(resolve_build_path "${1:-}")"
 readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
+readonly SERIAL_LOG="${BUILD_PATH}/recoverable-trap-test.serial.log"
 readonly LOG_FILE="${BUILD_PATH}/recoverable-trap-test.log"
+readonly QEMU_ERROR_LOG="${BUILD_PATH}/recoverable-trap-test.qemu.log"
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
@@ -56,6 +58,8 @@ if [[ ! -f "${FIRMWARE}" ]]; then
     echo "Firmware image not found: ${FIRMWARE}" >&2
     exit 1
 fi
+
+rm -f "${SERIAL_LOG}" "${LOG_FILE}" "${QEMU_ERROR_LOG}"
 
 set +e
 timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
@@ -66,15 +70,24 @@ timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
         -smp 1 \
         -bios "${FIRMWARE}" \
         -display none \
-        -serial stdio \
+        -serial "file:${SERIAL_LOG}" \
         -monitor none \
-        >"${LOG_FILE}" 2>&1
+        >"${QEMU_ERROR_LOG}" 2>&1
 readonly QEMU_STATUS=$?
 set -e
+
+if [[ -f "${SERIAL_LOG}" ]]; then
+    tr -d '\r' <"${SERIAL_LOG}" >"${LOG_FILE}"
+else
+    : >"${LOG_FILE}"
+fi
 
 cat "${LOG_FILE}"
 
 if [[ ${QEMU_STATUS} -ne 124 ]]; then
+    if [[ -s "${QEMU_ERROR_LOG}" ]]; then
+        cat "${QEMU_ERROR_LOG}" >&2
+    fi
     echo "Recoverable trap test: unexpected QEMU status ${QEMU_STATUS}" >&2
     exit 1
 fi
