@@ -25,8 +25,10 @@ add_executable(
 
     microkernel/arch/riscv/start.S
     microkernel/arch/riscv/trap.S
+    microkernel/arch/riscv/trap_frame_test.S
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
+    microkernel/core/trap_frame_test.cpp
     platform/qemu_virt/uart.c
 )
 
