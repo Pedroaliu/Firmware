@@ -25,9 +25,9 @@ jixia_trap_frame_test:
     li t1, 1
     sd t1, 0(t0)
 
-#define JIXIA_LOAD_TEST_GPR(index, reg, value) li reg, value;
-    JIXIA_TRAP_TEST_FIXED_GPRS(JIXIA_LOAD_TEST_GPR)
-#undef JIXIA_LOAD_TEST_GPR
+#define LOAD_TEST_GPR(index, reg, value) li reg, value;
+    TRAP_TEST_FIXED_GPRS(LOAD_TEST_GPR)
+#undef LOAD_TEST_GPR
 
     /* Explicit 32-bit EBREAK: expected mcause=3 and mtval=0. */
     .word 0x00100073
