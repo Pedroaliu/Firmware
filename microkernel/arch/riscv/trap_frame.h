@@ -1,10 +1,10 @@
 #pragma once
 
 /*
- * RV64 machine-mode trap-frame ABI.
+ * Jixia RV64 machine-mode trap-frame ABI.
  *
  * This header is shared by C++ and preprocessed assembly (.S).
- * Keep all offsets numeric and architecture-defined.
+ * Keep every offset numeric and identical on both sides of the ABI.
  */
 
 #define JIXIA_TRAP_X0_OFFSET        0
@@ -58,9 +58,7 @@ namespace jixia::arch::riscv {
 struct alignas(JIXIA_TRAP_FRAME_ALIGNMENT) TrapFrame {
     /*
      * General-purpose registers indexed by architectural register number.
-     *
-     * x[0] is reserved and always represents architectural zero.
-     * Keeping the slot makes register-number indexing direct and stable.
+     * x[0] is explicitly written as zero by the entry path.
      */
     uintptr_t x[32];
 
@@ -73,30 +71,53 @@ struct alignas(JIXIA_TRAP_FRAME_ALIGNMENT) TrapFrame {
 static_assert(sizeof(uintptr_t) == 8);
 static_assert(alignof(TrapFrame) == JIXIA_TRAP_FRAME_ALIGNMENT);
 static_assert(sizeof(TrapFrame) == JIXIA_TRAP_FRAME_SIZE);
+static_assert(
+    (JIXIA_TRAP_FRAME_SIZE % JIXIA_TRAP_FRAME_ALIGNMENT) == 0);
 
-static_assert(offsetof(TrapFrame, x) == JIXIA_TRAP_X0_OFFSET);
-static_assert(
-    offsetof(TrapFrame, x) + (sizeof(uintptr_t) * 1U) ==
-    JIXIA_TRAP_X1_OFFSET);
-static_assert(
-    offsetof(TrapFrame, x) + (sizeof(uintptr_t) * 2U) ==
-    JIXIA_TRAP_X2_OFFSET);
-static_assert(
-    offsetof(TrapFrame, x) + (sizeof(uintptr_t) * 31U) ==
-    JIXIA_TRAP_X31_OFFSET);
+#define JIXIA_ASSERT_TRAP_X_OFFSET(index)                         \
+    static_assert(                                                \
+        offsetof(TrapFrame, x) + (sizeof(uintptr_t) * (index)) == \
+        JIXIA_TRAP_X##index##_OFFSET)
 
-static_assert(
-    offsetof(TrapFrame, mstatus) ==
-    JIXIA_TRAP_MSTATUS_OFFSET);
-static_assert(
-    offsetof(TrapFrame, mepc) ==
-    JIXIA_TRAP_MEPC_OFFSET);
-static_assert(
-    offsetof(TrapFrame, mcause) ==
-    JIXIA_TRAP_MCAUSE_OFFSET);
-static_assert(
-    offsetof(TrapFrame, mtval) ==
-    JIXIA_TRAP_MTVAL_OFFSET);
+JIXIA_ASSERT_TRAP_X_OFFSET(0);
+JIXIA_ASSERT_TRAP_X_OFFSET(1);
+JIXIA_ASSERT_TRAP_X_OFFSET(2);
+JIXIA_ASSERT_TRAP_X_OFFSET(3);
+JIXIA_ASSERT_TRAP_X_OFFSET(4);
+JIXIA_ASSERT_TRAP_X_OFFSET(5);
+JIXIA_ASSERT_TRAP_X_OFFSET(6);
+JIXIA_ASSERT_TRAP_X_OFFSET(7);
+JIXIA_ASSERT_TRAP_X_OFFSET(8);
+JIXIA_ASSERT_TRAP_X_OFFSET(9);
+JIXIA_ASSERT_TRAP_X_OFFSET(10);
+JIXIA_ASSERT_TRAP_X_OFFSET(11);
+JIXIA_ASSERT_TRAP_X_OFFSET(12);
+JIXIA_ASSERT_TRAP_X_OFFSET(13);
+JIXIA_ASSERT_TRAP_X_OFFSET(14);
+JIXIA_ASSERT_TRAP_X_OFFSET(15);
+JIXIA_ASSERT_TRAP_X_OFFSET(16);
+JIXIA_ASSERT_TRAP_X_OFFSET(17);
+JIXIA_ASSERT_TRAP_X_OFFSET(18);
+JIXIA_ASSERT_TRAP_X_OFFSET(19);
+JIXIA_ASSERT_TRAP_X_OFFSET(20);
+JIXIA_ASSERT_TRAP_X_OFFSET(21);
+JIXIA_ASSERT_TRAP_X_OFFSET(22);
+JIXIA_ASSERT_TRAP_X_OFFSET(23);
+JIXIA_ASSERT_TRAP_X_OFFSET(24);
+JIXIA_ASSERT_TRAP_X_OFFSET(25);
+JIXIA_ASSERT_TRAP_X_OFFSET(26);
+JIXIA_ASSERT_TRAP_X_OFFSET(27);
+JIXIA_ASSERT_TRAP_X_OFFSET(28);
+JIXIA_ASSERT_TRAP_X_OFFSET(29);
+JIXIA_ASSERT_TRAP_X_OFFSET(30);
+JIXIA_ASSERT_TRAP_X_OFFSET(31);
+
+#undef JIXIA_ASSERT_TRAP_X_OFFSET
+
+static_assert(offsetof(TrapFrame, mstatus) == JIXIA_TRAP_MSTATUS_OFFSET);
+static_assert(offsetof(TrapFrame, mepc) == JIXIA_TRAP_MEPC_OFFSET);
+static_assert(offsetof(TrapFrame, mcause) == JIXIA_TRAP_MCAUSE_OFFSET);
+static_assert(offsetof(TrapFrame, mtval) == JIXIA_TRAP_MTVAL_OFFSET);
 
 } // namespace jixia::arch::riscv
 
