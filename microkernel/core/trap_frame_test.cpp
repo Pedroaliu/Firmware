@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "microkernel/arch/riscv/trap_frame_test_values.h"
 #include "uart.h"
@@ -13,6 +14,8 @@ volatile uintptr_t jixia_trap_test_expected_tp = 0;
 
 namespace jixia::microkernel::trap_test {
 
+using jixia::arch::riscv::ExceptionCode;
+using jixia::arch::riscv::TrapCause;
 using jixia::arch::riscv::TrapFrame;
 
 struct ExpectedGpr {
@@ -21,10 +24,10 @@ struct ExpectedGpr {
 };
 
 constexpr ExpectedGpr fixed_gprs[] = {
-#define JIXIA_EXPECTED_GPR(index, reg, value) \
+#define EXPECTED_GPR(index, reg, value) \
     {static_cast<uintptr_t>(index), static_cast<uintptr_t>(value)},
-    JIXIA_TRAP_TEST_FIXED_GPRS(JIXIA_EXPECTED_GPR)
-#undef JIXIA_EXPECTED_GPR
+    TRAP_TEST_FIXED_GPRS(EXPECTED_GPR)
+#undef EXPECTED_GPR
 };
 
 bool check_value(
@@ -69,8 +72,7 @@ bool check_gpr(
 
 [[noreturn]] void finish(const TrapFrame& frame)
 {
-    constexpr uintptr_t interrupt_bit = uintptr_t{1} << 63U;
-    constexpr uintptr_t breakpoint_code = 3U;
+    const TrapCause cause{frame.mcause};
 
     uart_puts("\n[Jixia][Test][TrapFrame]\n");
 
@@ -79,8 +81,7 @@ bool check_gpr(
     passed &= check_value(
         "frame alignment",
         0U,
-        reinterpret_cast<uintptr_t>(&frame) %
-            JIXIA_TRAP_FRAME_ALIGNMENT);
+        reinterpret_cast<uintptr_t>(&frame) % TRAP_FRAME_ALIGNMENT);
     passed &= check_value("x0", 0U, frame.x[0]);
     passed &= check_value(
         "saved sp",
@@ -105,12 +106,12 @@ bool check_gpr(
 
     passed &= check_value(
         "trap kind",
-        0U,
-        frame.mcause & interrupt_bit);
+        1U,
+        cause.is_exception() ? 1U : 0U);
     passed &= check_value(
         "mcause code",
-        breakpoint_code,
-        frame.mcause & ~interrupt_bit);
+        static_cast<uintptr_t>(ExceptionCode::breakpoint),
+        cause.code());
     passed &= check_value("mtval", 0U, frame.mtval);
 
     uart_puts(
