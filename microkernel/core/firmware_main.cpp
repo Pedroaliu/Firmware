@@ -1,7 +1,9 @@
 #include <stdint.h>
 
-#include "uart.h"
+#include "microkernel/console/console.h"
 
+extern "C" void jixia_platform_console_initialize();
+extern "C" void jixia_console_test();
 extern "C" void jixia_recoverable_trap_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
 
@@ -9,23 +11,23 @@ namespace jixia::microkernel {
 
 [[noreturn]] void main(uintptr_t hart_id, uintptr_t dtb_address)
 {
-    uart_puts("\n");
-    uart_puts("Jixia M00\n");
-    uart_puts("hart        : ");
-    uart_put_hex_uintptr(hart_id);
-    uart_puts("\n");
+    jixia_platform_console_initialize();
 
-    uart_puts("dtb         : ");
-    uart_put_hex_uintptr(dtb_address);
-    uart_puts("\n");
-
-    uart_puts("microkernel : entered (codename: Mozi)\n");
-    uart_puts("trap test   : recoverable EBREAK and C.EBREAK\n");
+    console::out
+        << '\n'
+        << "Jixia M00\n"
+        << "hart        : " << console::hex(hart_id) << '\n'
+        << "dtb         : " << console::hex(dtb_address) << '\n'
+        << "microkernel : entered (codename: Mozi)\n"
+        << "console     : router + memory + UART sinks\n"
+        << "trap test   : recoverable EBREAK and C.EBREAK\n";
 
     /*
-     * M00-03 first proves dispatch -> trap.S restore -> mret. The existing
-     * TrapFrame capture test then runs as a regression and parks the hart.
+     * Console is a standalone foundation on top of the completed M00-03
+     * baseline. Keep prior trap milestones as live regressions after the
+     * Console-specific routing/memory test.
      */
+    jixia_console_test();
     jixia_recoverable_trap_test();
     jixia_trap_frame_test();
 }
