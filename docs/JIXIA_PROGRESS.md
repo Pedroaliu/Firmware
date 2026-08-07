@@ -5,10 +5,9 @@
 - **Last updated:** 2026-08-07
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
-- **Integration branch:** `integration/console-foundation`
-- **Next development branch:** `milestone/m00-05-smp-foundation`
+- **Current progress branch:** `milestone/m00-05-smp-foundation`
 - **Current milestone:** `M00-05 Per-hart state, stacks, and SMP foundation`
-- **Current status:** ACTIVE — first task is integrated single-hart regression, then multi-hart bring-up
+- **Current status:** ACTIVE — validate the integrated single-hart baseline, then begin multi-hart bring-up
 
 ## Status legend
 
@@ -29,22 +28,20 @@
 | M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, `mtval` fatal path |
 | M00-02 Complete RV64 TrapFrame | DONE | `bash scripts/test-trap-frame.sh`; `TRAP_FRAME_TEST: PASS` | complete integer context, shared assembly/C++ ABI, common save/restore path |
 | M00-03 Recoverable trap and `mret` | DONE | `bash scripts/test-recoverable-trap.sh`; `RECOVERABLE_TRAP_TEST: PASS` | 32-bit `EBREAK` and 16-bit `C.EBREAK` resume through common restore + `mret` |
-| M00-04 Machine timer interrupt | DONE | branch `milestone/m00-04-timer-interrupt`; integrated to `main` by PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt; timer is serviced/rearmed without advancing saved `mepc` |
+| M00-04 Machine timer interrupt | DONE | branch `milestone/m00-04-timer-interrupt`; PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt; saved `mepc` is not artificially advanced |
 | F00-01 Kernel print foundation | DONE | branch `feature/console-foundation`; `scripts/test-kernel-print.sh`; user-confirmed QEMU acceptance on 2026-08-07 | shared formatter, 36 KiB append-only kernel log, temporary UART mirror, `printk` |
-| Console/timer integration | ACTIVE | branch `integration/console-foundation` | preserve both timer and console paths; integrated acceptance requires all four foundation PASS markers |
-| M00-05 Per-hart state, stacks, SMP foundation | ACTIVE | pending | next code milestone after integration baseline is accepted |
+| Console/timer integration | DONE | PR #8; squash commit `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | rebuilt from `main` so timer and console foundations coexist without branch-regression |
+| M00-05 Per-hart state, stacks, SMP foundation | ACTIVE | pending | next code milestone |
 | M00-06 Privilege transition foundation | NEXT | pending | firmware-first privilege model |
 | M00-07 Early physical allocator | PLANNED | pending | supports later service/memory work |
 | M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
 | M00-09 Automated QEMU test harness | PLANNED | pending | consolidate machine-checkable regression tests |
 
-The temporary `Console/timer integration` row is repository-maintenance work, not a new architectural milestone. Remove or mark it DONE once the integration branch is merged.
-
 ## Accepted foundation
 
 ### M00-02 — TrapFrame
 
-The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout. The known-register test produced:
+The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout. Recorded result:
 
 ```text
 TRAP_FRAME_TEST: PASS
@@ -76,7 +73,7 @@ mcause.code      = 7
 
 Key invariant: asynchronous timer handling does **not** advance saved `mepc`. The timer condition is serviced/rearmed before return through the same TrapFrame restore path.
 
-Source/test artifacts are retained on `main` after PR #6:
+Integrated source/test artifacts:
 
 ```text
 microkernel/core/timer.{h,cpp}
@@ -101,14 +98,22 @@ shared freestanding formatter
 
 The future runtime Console Service remains separate from this minimum kernel diagnostic path. See `docs/JIXIA_CONSOLE_DESIGN.md`.
 
-The kernel-print test validates exact formatting bytes and preserves the trap regressions. During repository integration it also checks the M00-04 timer marker:
+The integrated firmware executes the live regressions in this order:
+
+```text
+Kernel Print
+  -> Recoverable Trap
+  -> Machine Timer
+  -> TrapFrame (parks hart)
+```
+
+The two integrated acceptance scripts cross-check the foundation markers:
 
 ```text
 KERNEL_PRINT_TEST: PASS
 RECOVERABLE_TRAP_TEST: PASS
 MACHINE_TIMER_TEST: PASS
 TRAP_FRAME_TEST: PASS
-Kernel print test: PASS
 ```
 
 ## NOW — M00-05 Per-hart state, stacks, and SMP foundation
@@ -119,14 +124,14 @@ Move Mozi from a single boot hart to a correct multi-hart foundation without har
 
 ### First gate: integrated baseline
 
-Before changing SMP state, run on the integration branch:
+Before changing SMP state, run from `main` or the new M00-05 branch:
 
 ```bash
 bash scripts/test-kernel-print.sh
 bash scripts/test-timer-interrupt.sh
 ```
 
-Both scripts must observe the integrated foundation without a fatal trap.
+Both scripts must observe the integrated foundation without a fatal trap. This is a post-integration regression gate; it does not reopen the already accepted component designs.
 
 ### Work breakdown
 
@@ -181,7 +186,7 @@ They are released only through the gates in `docs/JIXIA_SOLO_ROADMAP.md`.
 
 ## Branch/integration rule
 
-Completed milestones and accepted foundational features should be merged into `main` promptly. New major work starts from the latest integrated baseline.
+Completed milestones and accepted foundational features are merged into `main` promptly. New major work starts from the latest integrated baseline.
 
 ```text
 main
@@ -199,12 +204,12 @@ Do not build a long chain of completed milestone branches while leaving `main` s
 
 ## Progress history
 
-### 2026-08-07 — repository baseline consolidation
+### 2026-08-07 — repository baseline consolidated
 
-- M00-02, M00-03, and M00-04 were integrated into `main` through PR #6 (`d33111c2beb1e360bb057747f8b1c7dda34dc773`).
-- Console/Kernel Print is being integrated on `integration/console-foundation` rather than blindly merging the diverged feature branch.
-- Conflict resolution preserves both timer and console code paths.
-- Kernel, recoverable-trap, machine-timer, and TrapFrame test output is routed through the accepted kernel print path.
+- M00-02, M00-03, and M00-04 integrated through PR #6; merge commit `d33111c2beb1e360bb057747f8b1c7dda34dc773`.
+- The original direct Console PR #7 was closed because `feature/console-foundation` had diverged before M00-04 and would have regressed timer work.
+- A conflict-resolved integration was rebuilt from `main` and merged through PR #8; squash commit `043d7c71eba8ed067ccda5421a11e408f69bd1a0`.
+- CMake, firmware entry, trap dispatch, diagnostics, linker rules, and regression scripts now preserve both timer and console foundations.
 - The next architectural milestone is M00-05 SMP/per-hart foundation.
 
 ### 2026-08-07 — F00-01 Kernel Print accepted
