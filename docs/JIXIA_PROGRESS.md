@@ -6,8 +6,9 @@
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Progress branch:** `feature/console-foundation`
 - **Stable integration branch:** `main`
-- **Current work item:** `F00-01 Console foundation`
-- **Current status:** ACTIVE — establish a standalone firmware Console architecture and implementation
+- **Current work item:** `F00-01 Kernel print foundation`
+- **Current status:** ACTIVE — implementation prepared; GNU RISC-V/QEMU acceptance pending
+- **Canonical Console design:** `docs/JIXIA_CONSOLE_DESIGN.md`
 - **Parked work:** `M00-04 Timer interrupt` on `milestone/m00-04-timer-interrupt` at `299aff177497399236a848724b56c2e040ce4db4`
 
 ## Status legend
@@ -16,7 +17,7 @@
 |---|---|
 | `DONE` | Definition of Done satisfied and evidence recorded |
 | `ACTIVE` | the single current primary work item |
-| `PAUSED` | implementation is preserved but deliberately not current work |
+| `PAUSED` | implementation preserved but deliberately not current work |
 | `NEXT` | ordered immediately after ACTIVE |
 | `PLANNED` | accepted roadmap item, not started |
 | `FROZEN` | deliberately blocked by an architectural prerequisite |
@@ -36,9 +37,10 @@
 | Freestanding C++ compatibility fix | DONE | `7d8a66f4dbac12e6196d0fbbf3a28932647bbd0e` | GNU bare-metal build and QEMU revalidated |
 | M00-02 Complete RV64 TrapFrame | DONE | `bash scripts/test-trap-frame.sh` on 2026-08-07 | complete integer context and `TRAP_FRAME_TEST: PASS` |
 | M00-03 Recoverable trap and `mret` | DONE | `bash scripts/test-recoverable-trap.sh` on 2026-08-07 | 32-bit `EBREAK` and 16-bit `C.EBREAK` both resume through common restore + `mret` |
-| F00-01 Console foundation | ACTIVE | branch `feature/console-foundation`; QEMU acceptance pending | standalone output architecture: stream, router, memory sink, UART sink, emergency route |
-| M00-04 Timer interrupt | PAUSED | branch `milestone/m00-04-timer-interrupt` at `299aff177497399236a848724b56c2e040ce4db4` | timer implementation preserved separately; resume after Console integration |
-| M00-05 Per-hart state and stacks | NEXT | pending | required before multicore work |
+| F00-01 Kernel print foundation | ACTIVE | branch `feature/console-foundation`; QEMU acceptance pending | `printk`, shared formatter, 36 KiB append-only kernel log, temporary raw-UART mirror |
+| Future usr Console Service | PLANNED | design recorded in `docs/JIXIA_CONSOLE_DESIGN.md` | queue/daemon, logical channels, UART/screen/SOL/Jingjie backends deferred until services exist |
+| M00-04 Timer interrupt | PAUSED | branch `milestone/m00-04-timer-interrupt` at `299aff177497399236a848724b56c2e040ce4db4` | timer implementation preserved separately; resume after F00-01 acceptance |
+| M00-05 Per-hart state and stacks | NEXT | pending | required before multicore work and kernel-print concurrency policy |
 | M00-06 Privilege transition foundation | NEXT | pending | remains in firmware-first phase |
 | M00-07 Early physical allocator | PLANNED | pending | supports later service/memory work |
 | M00-08 Structured event and trace ABI | PLANNED | pending | shared later with Jingjie |
@@ -85,137 +87,151 @@ TRAP_FRAME_TEST: PASS
 Recoverable trap test: PASS
 ```
 
-## NOW: F00-01 Console foundation
+## NOW: F00-01 Kernel print foundation
 
-### Why this is separate from M00-04
+### Why the scope changed
 
-Console and machine-timer interrupt are independent platform features. Mixing them made the M00-04 branch contain both an asynchronous-trap mechanism and a large cross-cutting output architecture, making review, regression attribution, and later integration unnecessarily confusing.
+The first Console prototype put router, multiple sinks, stream syntax, memory ring, UART backend and future service concepts directly under `microkernel/console`.
 
-The split is now explicit:
-
-```text
-feature/console-foundation
-    based on completed M00-03
-    contains Console only
-
-milestone/m00-04-timer-interrupt
-    timer-only work preserved at 299aff177497399236a848724b56c2e040ce4db4
-    paused until Console is accepted
-```
-
-A safety backup of the earlier mixed history is retained as `backup/m00-04-timer-console-mixed`.
-
-### Objective
-
-Replace direct UART use in normal firmware output with a small freestanding Console architecture that supports multiple output sinks without introducing the hosted C++ runtime.
-
-### Architecture
+After studying the supplied Hostboot kernel and `usr/console` implementations, the accepted boundary is narrower:
 
 ```text
-console::out / future printk / future log frontend
-                    |
-                    v
-                 Formatter
-                    |
-                    v
-               ConsoleRouter
-              /      |       \
-        MemorySink UartSink future sinks
-                              |
-                         screen / SOL / Jingjie
+NOW: microkernel
+    printk
+    shared formatter
+    append-only KernelLogBuffer
+    temporary raw-UART mirror
+
+LATER: usr/service runtime
+    display/displayf/console::out
+    queue + daemon
+    logical DEFAULT/DEBUG channels
+    UART/screen/SOL/Jingjie routing
 ```
 
-Console text and future structured RAS/event records may share transports, but they are not the same data model.
+The full decision record and future TODOs are in `docs/JIXIA_CONSOLE_DESIGN.md`. Future Console work should resume from that file rather than repeating the source study.
 
-### Work breakdown
+### Hostboot src.zip library review
+
+Reviewed supplied `src.zip`:
+
+- use the **design idea** from `lib/sprintf.C`: one formatter writing through a generic character receiver;
+- defer `lib/stdio.C` until Jixia actually needs `sprintf/snprintf`;
+- defer string/ctype/assert support until a real minimal libc/panic contract is needed;
+- do not import Hostboot `stdlib.C`, sync/syscall/TLS, or C++ runtime files because they depend on Hostboot heap/VMM/task/runtime semantics;
+- unrelated math/random/crc/splaytree code is not part of Kernel Print.
+
+### Current implementation
 
 ```text
-[x] write standalone Console architecture design
-[x] separate Console branch from timer branch
-[x] retain raw polling UART below Console
-[x] implement lightweight ConsoleSink descriptor
-[x] implement fixed-capacity ConsoleRouter
-[x] implement normal and emergency routing
-[x] implement 36 KiB static memory ring sink
-[x] implement lightweight integer/hex/pointer formatting
-[x] implement console::out and console::emergency stream frontends
-[x] implement QEMU polling-UART sink
-[x] migrate normal firmware banner output to Console
-[x] migrate M00-03 test output to Console
-[x] migrate M00-02 TrapFrame diagnostics to Console
-[x] add dedicated Console memory/UART acceptance test
-[x] add `scripts/test-console.sh`
-[ ] build with the user's GNU RISC-V bare-metal toolchain
-[ ] run `bash scripts/test-console.sh`
-[ ] rerun M00-03 recoverable-trap regression
-[ ] rerun M00-02 TrapFrame regression
-[ ] record acceptance evidence
+lib/format.{h,cpp}
+    freestanding formatter and generic Writer
+
+microkernel/console/kernel_console.{h,cpp}
+    36 KiB fixed append-only log
+    truncation flag
+    temporary raw-UART mirror
+
+microkernel/console/printk.{h,cpp}
+    Mozi printf-style kernel frontend
+
+microkernel/core/kernel_print_test.cpp
+    exact format + in-memory byte validation
+
+scripts/test-kernel-print.sh
+    QEMU acceptance + M00-03/M00-02 regression
 ```
 
-### Initial invariants
+Initial formatter supports:
 
-- `microkernel/console` has no QEMU MMIO knowledge.
-- UART is one sink, not the Console abstraction.
-- The memory sink is first-class diagnostic storage.
-- No heap allocation is used.
-- No `std::iostream`, exceptions, RTTI, or runtime static constructors are required.
-- Raw UART remains usable before Console initialization and in the lowest bring-up/fatal path.
-- Emergency routing reaches only sinks marked panic-safe.
-- Initial memory-ring implementation is single-writer/single-hart; multi-hart ownership is deferred until per-hart state exists.
-- No timer implementation is present in or required by the Console branch.
+```text
+%% %c %s
+%d %i %u %o
+%x %X %b %B %p
+hh h l ll z t
+# 0 - + space
+field width
+```
+
+No floating point, precision, locale, hosted stdio or full ISO-C printf claim.
+
+### Current invariants
+
+- kernel print is independent of any future Console Service;
+- formatter has no UART knowledge;
+- normal microkernel/test code uses `printk`, not direct `uart_puts`;
+- kernel memory log is authoritative;
+- UART is only a bring-up mirror;
+- raw `uart_putc` remains below the formatted path;
+- buffer is append-only, not a ring;
+- no heap/task/IPC/iostream/exceptions/RTTI/runtime-static-constructor dependency;
+- initial implementation is single-hart/non-locking;
+- timer code is not part of this branch.
 
 ### Acceptance command
 
 ```bash
-bash scripts/test-console.sh
+bash scripts/test-kernel-print.sh
 ```
 
 Required markers:
 
 ```text
-console-memory-probe
-memory     : ring sink retained exact probe
-CONSOLE_TEST: PASS
+[Jixia][Test][KernelPrint]
+probe      : s=ok d=-42 u=42 x=00001a2b p=0x0000000000001234 %
+buffer     : append-only kernel log retained exact probe
+capacity   : 36864 bytes
+KERNEL_PRINT_TEST: PASS
 RECOVERABLE_TRAP_TEST: PASS
 TRAP_FRAME_TEST: PASS
-Console test: PASS
+Kernel print test: PASS
 ```
 
-Canonical design record: `docs/JIXIA_CONSOLE_DESIGN.md`.
+### Remaining F00-01 work
+
+```text
+[x] settle kernel-vs-usr Console boundary
+[x] record future usr Console Service architecture/TODO
+[x] review supplied Hostboot src.zip libraries
+[x] implement shared formatter candidate
+[x] implement printk candidate
+[x] implement append-only KernelLogBuffer candidate
+[x] preserve raw UART as lower-level primitive
+[x] migrate normal kernel/test output to printk
+[x] add exact KernelLogBuffer format test
+[x] add dedicated QEMU acceptance script
+[x] compile new Kernel Print sources with Clang RV64 bare-metal target and -Wall -Wextra -Werror
+[ ] build on user's GNU riscv64-unknown-elf toolchain
+[ ] run `bash scripts/test-kernel-print.sh`
+[ ] record final QEMU acceptance evidence
+```
 
 ## PAUSED: M00-04 Timer interrupt
 
-### Preserved implementation
-
-Timer work is not discarded. The clean timer-only branch is:
+Timer work is preserved at:
 
 ```text
 milestone/m00-04-timer-interrupt
-commit 299aff177497399236a848724b56c2e040ce4db4
+299aff177497399236a848724b56c2e040ce4db4
 ```
 
-It already contains the first candidate implementation and dedicated QEMU acceptance script, but it has not yet been accepted on the user's QEMU/toolchain.
+After F00-01 is accepted, resume M00-04 on top of the accepted Kernel Print foundation.
 
-### Objective when resumed
+Key timer invariants remain:
 
-Add the first recoverable asynchronous trap: a machine timer interrupt that is deliberately armed, recognized as interrupt code 7, serviced/rearmed, and returned through the existing common TrapFrame restore and `mret` path.
-
-### Key invariants when resumed
-
-- `mcause` must be **interrupt=true, code=7**.
-- Timer interrupt handling must not apply the synchronous EBREAK `mepc += instruction_length` rule.
-- The pending timer condition must be cleared/rearmed before return.
-- `trap.S` remains the common entry/restore path unless evidence proves otherwise.
-- M00-04 remains single-hart; per-hart timer/state belongs to M00-05.
-
-After Console is accepted, M00-04 should be rebased/reapplied on top of the accepted Console foundation and then independently validated.
+- `mcause` = interrupt=true/code=7;
+- asynchronous timer interrupt does not artificially advance `mepc`;
+- timer pending condition is cleared/rearmed before return;
+- common TrapFrame restore + `mret` remains the return path;
+- single-hart until M00-05.
 
 ## NEXT queue
 
-1. finish and accept `F00-01 Console foundation`;
-2. resume and accept `M00-04 Timer interrupt`;
-3. `M00-05 Per-hart state and stacks`;
-4. `M00-06 Privilege transition foundation`.
+1. finish/accept `F00-01 Kernel print foundation`
+2. resume and accept `M00-04 Timer interrupt`
+3. `M00-05 Per-hart state and stacks`
+4. `M00-06 Privilege transition foundation`
+5. `M00-07 Early physical allocator`
 
 Only one is ACTIVE at a time.
 
@@ -231,11 +247,9 @@ FROZEN  migration
 FROZEN  simulator-dependent partition hardware experiments
 ```
 
-They are released only through the gates in `docs/JIXIA_SOLO_ROADMAP.md`.
-
 ## Progress update protocol
 
-When a work item is completed, record:
+When a work item is completed, append:
 
 ```markdown
 ### YYYY-MM-DD — <work item> completed
@@ -252,45 +266,43 @@ When a work item is completed, record:
 - Next ACTIVE work item:
 ```
 
-Then update this ledger and `PROJECT_CONTEXT.md`.
+Then update the ledger, NOW section, and `PROJECT_CONTEXT.md` when the current branch or architecture direction changes.
 
 ## Progress history
 
-### 2026-08-07 — Console separated from timer work
+### 2026-08-07 — Console scope split into Kernel Print and future usr service
 
-- Status: ACTIVE feature split.
-- Decision: Console is an independent cross-cutting platform feature; it is not part of M00-04 Timer interrupt.
-- Active branch: `feature/console-foundation`, based on completed M00-03.
-- Timer branch: `milestone/m00-04-timer-interrupt`, preserved at `299aff177497399236a848724b56c2e040ce4db4`.
-- Safety backup: `backup/m00-04-timer-console-mixed` retains the earlier mixed branch history.
-- Reason: keep feature boundaries, regression evidence, and later review clean.
-- Next evidence: GNU RISC-V build + `bash scripts/test-console.sh`.
+- Status: ACTIVE design decision
+- Branch: `feature/console-foundation`
+- Decision: current work is only the Mozi Kernel Print foundation.
+- Source study: Hostboot kernel console, Hostboot `usr/console`, and supplied `src.zip` libraries reviewed.
+- Key boundary: kernel `printk`/buffer remains independent of the future queue/daemon/device Console Service.
+- Buffer policy: current kernel history is 36 KiB append-only rather than a runtime ring.
+- Library policy: implement only a small Jixia formatter now; do not import Hostboot libc/runtime wholesale.
+- Canonical design/TODO: `docs/JIXIA_CONSOLE_DESIGN.md`.
+- M00-04 remains PAUSED until Kernel Print is accepted.
 
 ### 2026-08-07 — M00-03 Recoverable trap and `mret` completed
 
 - Status: DONE
 - Branch: `milestone/m00-03-recoverable-trap`
 - Test command: `bash scripts/test-recoverable-trap.sh`
-- Test result: standard 32-bit EBREAK resumed, 16-bit C.EBREAK resumed, `RECOVERABLE_TRAP_TEST: PASS`, `TRAP_FRAME_TEST: PASS`, and final `Recoverable trap test: PASS`.
-- What was learned: trap recovery is software policy over saved architectural state; synchronous breakpoint recovery must distinguish instruction encoding/length from the trap cause itself.
-- Known limitations: no accepted asynchronous interrupt handling yet, no per-hart trap stack/state, no nested-trap policy.
+- Test result: standard 32-bit EBREAK resumed, 16-bit C.EBREAK resumed, `RECOVERABLE_TRAP_TEST: PASS`, `TRAP_FRAME_TEST: PASS`, final `Recoverable trap test: PASS`.
+- Next work later advanced to M00-04, then M00-04 was paused while Console/Kernel Print was separated cleanly.
 
 ### 2026-08-07 — M00-02 Complete RV64 TrapFrame completed
 
 - Status: DONE
-- Branch: `milestone/m00-02-trap-frame`
 - Test command: `bash scripts/test-trap-frame.sh`
 - Test result: `TRAP_FRAME_TEST: PASS`
-- What was learned: the trap frame is a software ABI between trap assembly and higher-level policy; hardware knows architectural registers/CSRs, not the C++ `TrapFrame` type.
 
 ### 2026-08-05 — freestanding C++ compatibility and QEMU revalidation
 
 - Status: DONE
-- Build result: passed on the user's Ubuntu workstation with `riscv64-unknown-elf-gcc/g++`.
-- QEMU result: Jixia entered the microkernel and observed the expected breakpoint exception state.
+- Build: passed on user's Ubuntu workstation with `riscv64-unknown-elf-gcc/g++`.
+- QEMU: Jixia entered the microkernel and observed expected breakpoint state.
 
 ### 2026-08-05 — solo development process established
 
 - Status: DONE
-- Roadmap commit: `1d9e1cfb9be782b5e7ad44d21b41600f021fd597`
-- Decision: one active primary work item at a time; no parallel major subsystem development.
+- Decision: one active milestone/work item at a time; no parallel major subsystem development.
