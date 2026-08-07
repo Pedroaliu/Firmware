@@ -3,6 +3,7 @@
 #include "microkernel/arch/riscv/instruction_decode.h"
 #include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
+#include "microkernel/core/timer.h"
 #include "uart.h"
 
 extern "C" int jixia_trap_frame_test_is_active();
@@ -14,6 +15,7 @@ namespace jixia::microkernel::trap {
 
 using jixia::arch::riscv::BreakpointDecode;
 using jixia::arch::riscv::ExceptionCode;
+using jixia::arch::riscv::InterruptCode;
 using jixia::arch::riscv::TrapCause;
 using jixia::arch::riscv::TrapFrame;
 using jixia::arch::riscv::Xlen;
@@ -70,15 +72,28 @@ using jixia::arch::riscv::instruction_length_bytes;
 }
 
 [[nodiscard]]
+bool try_handle_machine_timer_interrupt(const TrapFrame& frame)
+{
+    const TrapCause cause{frame.mcause};
+
+    if (!cause.is_interrupt(InterruptCode::machine_timer))
+    {
+        return false;
+    }
+
+    /*
+     * This is an asynchronous interrupt. Unlike EBREAK/C.EBREAK, do not
+     * advance frame.mepc: it already identifies the interrupted resume point.
+     */
+    timer::handle_interrupt();
+    return true;
+}
+
+[[nodiscard]]
 bool try_recover_breakpoint(TrapFrame& frame)
 {
     const TrapCause cause{frame.mcause};
 
-    /*
-     * Recovery is an explicit whitelist.  M00-03 accepts only a synchronous
-     * breakpoint exception; interrupts and every other exception remain
-     * fatal until their own handling policy is implemented.
-     */
     if (!cause.is_exception(ExceptionCode::breakpoint))
     {
         return false;
@@ -98,7 +113,7 @@ bool try_recover_breakpoint(TrapFrame& frame)
     }
 
     /*
-     * EBREAK and C.EBREAK leave mepc pointing at themselves.  trap.S later
+     * EBREAK and C.EBREAK leave mepc pointing at themselves. trap.S later
      * writes this modified value back to the mepc CSR before executing mret.
      */
     frame.mepc += instruction_length_bytes(decoded.length);
@@ -107,6 +122,11 @@ bool try_recover_breakpoint(TrapFrame& frame)
 
 void dispatch(TrapFrame& frame)
 {
+    if (try_handle_machine_timer_interrupt(frame))
+    {
+        return;
+    }
+
     if (try_recover_breakpoint(frame))
     {
         return;
