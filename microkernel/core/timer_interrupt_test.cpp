@@ -1,7 +1,7 @@
 #include <stdint.h>
 
+#include "microkernel/console/console.h"
 #include "microkernel/core/timer.h"
-#include "uart.h"
 
 namespace jixia::microkernel::timer_test {
 
@@ -14,7 +14,7 @@ void run()
      */
     constexpr uint64_t deadline_delta_ticks = 100000U;
 
-    uart_puts("\n[Jixia][Test][MachineTimer]\n");
+    console::out << "\n[Jixia][Test][MachineTimer]\n";
 
     const uintptr_t before = timer::interrupt_count();
     timer::arm_once(deadline_delta_ticks);
@@ -30,15 +30,16 @@ void run()
     const uintptr_t after = timer::interrupt_count();
     if (after != (before + 1U))
     {
-        uart_puts("MACHINE_TIMER_TEST: FAIL\n");
+        console::emergency << "MACHINE_TIMER_TEST: FAIL\n";
         for (;;)
         {
             __asm__ volatile("wfi");
         }
     }
 
-    uart_puts("interrupt  : machine timer observed and returned\n");
-    uart_puts("MACHINE_TIMER_TEST: PASS\n");
+    console::out
+        << "interrupt  : machine timer observed and returned\n"
+        << "MACHINE_TIMER_TEST: PASS\n";
 }
 
 } // namespace jixia::microkernel::timer_test
