@@ -83,54 +83,101 @@ A single LPAR is not automatically a normal KVM host. Native Linux must own HS-m
 
 ## Current state
 
-Completed:
+Integrated on `main`:
 
 - `M00-00`: RV64 QEMU virt entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap path.
-- project identity established as Jixia.
-- executable core moved to semantic `microkernel/` paths and a freestanding C++ `jixia::*` namespace boundary.
+- `M00-02`: complete RV64 TrapFrame and save/restore ABI.
+- `M00-03`: recoverable 32-bit `EBREAK` and 16-bit `C.EBREAK` through `mret`.
+- `M00-04`: recoverable machine timer interrupt.
+- `F00-01`: shared freestanding formatter, 36 KiB KernelLogBuffer, and `printk` with a temporary raw-UART mirror.
+- completed milestone chain integrated through PR #6.
+- timer/console divergence resolved and integrated through PR #8.
 
-Next:
+Current development:
 
 ```text
-M00-02  Complete TrapFrame
-M00-03  Recoverable trap and mret
-M00-04  Timer interrupt
-M00-05  Per-hart state
-M00-06  Privilege transition
+ACTIVE  M00-05 Per-hart state, stacks, and SMP foundation
+NEXT    M00-06 Privilege transition foundation
+NEXT    M00-07 Early physical allocator
+NEXT    M00-08 Structured event and trace ABI
 ```
+
+The M00-05 branch is `milestone/m00-05-smp-foundation`.
+
+Before SMP changes, keep the integrated single-hart foundation green:
+
+```bash
+bash scripts/test-kernel-print.sh
+bash scripts/test-timer-interrupt.sh
+```
+
+Both scripts check the live Kernel Print, recoverable-trap, machine-timer, and TrapFrame markers.
+
+## Console and observability
+
+The minimum kernel diagnostic path is intentionally small:
+
+```text
+printk -> shared formatter -> KernelLogBuffer -> optional raw-UART mirror
+```
+
+The richer runtime Console Service is deferred until tasks, IPC, service lifecycle, allocator/runtime, and device ownership exist. Structured Trace and RAS events remain separate contracts from console text.
+
+Design records:
+
+- [`docs/JIXIA_CONSOLE_DESIGN.md`](docs/JIXIA_CONSOLE_DESIGN.md)
+- [`docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`](docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md)
+- [`docs/JIXIA_TRACE_OBSERVABILITY_VISION.md`](docs/JIXIA_TRACE_OBSERVABILITY_VISION.md)
 
 ## Build
 
 Prerequisites:
 
 - CMake 3.20 or newer
+- Ninja
 - `riscv64-unknown-elf-gcc` and `riscv64-unknown-elf-g++`
 - `qemu-system-riscv64`
 
+Preferred debug build:
+
 ```bash
-cmake -S . -B build \
+cmake --preset jixia-rv64-debug
+cmake --build --preset jixia-rv64-debug
+```
+
+Equivalent explicit configuration:
+
+```bash
+cmake -S . -B build/clion-debug \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_TOOLCHAIN_FILE=cmake/riscv64-unknown-elf.cmake
 
-cmake --build build
-./scripts/run-qemu.sh
+cmake --build build/clion-debug --target jixia.elf
 ```
 
-Generated artifacts:
+Generated artifacts include:
 
 ```text
-build/jixia.elf
-build/jixia.bin
-build/jixia.map
-build/jixia.dis
-build/jixia.readelf
+build/clion-debug/jixia.elf
+build/clion-debug/jixia.bin
+build/clion-debug/jixia.map
+build/clion-debug/jixia.dis
+build/clion-debug/jixia.readelf
 ```
+
+For a configured build directory, `./scripts/run-qemu.sh <build-dir>` runs the firmware image.
 
 ## Repository layout
 
 ```text
 boot/                    Boot0 contract (codename Pangu)
 microkernel/             executable host firmware microkernel (Mozi)
+  arch/riscv/            trap/ISA architecture code
+  console/               minimal Kernel Print path
+  core/                  architecture-independent kernel policy/tests
+lib/                     freestanding shared utilities
 platform/model/          PlatformGraph and ownership model (Nuwa)
 hypervisor/              firmware-native partition runtime (ArchHV)
 services/driver_domain/  Linux driver and boot service (Luban)
@@ -144,8 +191,8 @@ interfaces/simulator/    firmware-simulator boundary (Jingjie)
 
 platform/qemu_virt/      current physical-platform backend
 linker/                  linker scripts
-scripts/                 build/run helpers
-docs/                    architecture and source records
+scripts/                 build/run/test helpers
+docs/                    architecture, design, source, and progress records
 ```
 
 Placeholder module directories define ownership and planned interfaces; they do not claim completed implementations.
@@ -155,8 +202,10 @@ Placeholder module directories define ownership and planned interfaces; they do 
 Every new project conversation or coding session begins with:
 
 1. [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md)
-2. [`docs/JIXIA_ARCHITECTURE_V0.3.md`](docs/JIXIA_ARCHITECTURE_V0.3.md)
-3. [`docs/JIXIA_PROJECT_SOURCES.md`](docs/JIXIA_PROJECT_SOURCES.md)
-4. current code and recent commits
+2. [`docs/JIXIA_PROGRESS.md`](docs/JIXIA_PROGRESS.md)
+3. [`docs/JIXIA_SOLO_ROADMAP.md`](docs/JIXIA_SOLO_ROADMAP.md)
+4. [`docs/JIXIA_ARCHITECTURE_V0.3.md`](docs/JIXIA_ARCHITECTURE_V0.3.md)
+5. [`docs/JIXIA_PROJECT_SOURCES.md`](docs/JIXIA_PROJECT_SOURCES.md)
+6. current code, current progress branch, and recent commits
 
 Older `docs/ARCHFW_*` and `JIXIA_ARCHITECTURE_V0.2.md` files remain historical design records. Jixia is canonical; cultural component names are codenames, while code uses semantic English names and `jixia::*` namespaces.
