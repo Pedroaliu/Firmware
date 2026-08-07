@@ -2,6 +2,10 @@
 
 #include "uart.h"
 
+extern "C" void jixia_recoverable_trap_test();
+extern "C" void jixia_machine_timer_test();
+extern "C" [[noreturn]] void jixia_trap_frame_test();
+
 namespace jixia::microkernel {
 
 [[noreturn]] void main(uintptr_t hart_id, uintptr_t dtb_address)
@@ -17,15 +21,16 @@ namespace jixia::microkernel {
     uart_puts("\n");
 
     uart_puts("microkernel : entered (codename: Mozi)\n");
-    uart_puts("trap test   : breakpoint\n");
+    uart_puts("trap test   : recoverable exceptions and machine timer\n");
 
-    /* Emit an explicit 32-bit EBREAK rather than C.EBREAK. */
-    __asm__ volatile(".word 0x00100073");
-
-    for (;;)
-    {
-        __asm__ volatile("wfi");
-    }
+    /*
+     * Keep prior milestones as live regressions. M00-04 adds the first
+     * asynchronous interrupt between the recoverable-breakpoint test and the
+     * final TrapFrame capture test, which parks the hart after validation.
+     */
+    jixia_recoverable_trap_test();
+    jixia_machine_timer_test();
+    jixia_trap_frame_test();
 }
 
 } // namespace jixia::microkernel
