@@ -3,162 +3,169 @@
 ## Current snapshot
 
 - **Last updated:** 2026-08-07
-- **Working mode:** solo development with ChatGPT research/review support
-- **Progress branch:** `milestone/m00-04-timer-interrupt`
+- **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
-- **Current milestone:** `M00-04 Timer interrupt`
-- **Current status:** ACTIVE — establish the first recoverable asynchronous machine-mode interrupt path
+- **Integration branch:** `integration/console-foundation`
+- **Next development branch:** `milestone/m00-05-smp-foundation`
+- **Current milestone:** `M00-05 Per-hart state, stacks, and SMP foundation`
+- **Current status:** ACTIVE — first task is integrated single-hart regression, then multi-hart bring-up
 
 ## Status legend
 
 | Status | Meaning |
 |---|---|
-| `DONE` | Definition of Done satisfied and evidence recorded |
+| `DONE` | implementation accepted and evidence retained |
 | `ACTIVE` | the single current primary milestone |
 | `NEXT` | ordered immediately after ACTIVE |
 | `PLANNED` | accepted roadmap item, not started |
-| `FROZEN` | deliberately blocked by an architectural prerequisite |
+| `FROZEN` | blocked by an architectural prerequisite |
 | `RESEARCH` | exploratory work without an implementation commitment |
 
-## Milestone ledger
+## Milestone / feature ledger
 
-| Milestone | Status | Evidence | Notes |
+| Work item | Status | Evidence | Notes |
 |---|---|---|---|
 | M00-00 Minimal RV64 boot, stack, BSS, UART | DONE | `c30c0405b388a0fba4c528856236ff02267f1a77` | QEMU virt reset entry and initial firmware output |
-| M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, and `mtval`; non-resumable; revalidated on 2026-08-05 after freestanding C++ compatibility fix |
-| Architecture v0.1 | DONE | `1fe8fbcf16a477fc921e7b5aac7be066d13c65b2` | original ArchFW architecture record |
-| LPAR/CECSIM co-design direction | DONE | `9f5422939fa5501811135170a1c8633ef18842f3` | long-term firmware-native partition and simulator direction |
-| Jixia naming and persistent context | DONE | `6c6769adb8f1aa9c6e1b6f4afb9d3800b5d22433` | Jixia identity and project memory established |
-| Semantic paths and `jixia::*` namespaces | DONE | `df8bc2d6bd32d1b13b659e5e33629d24c1488bc2` | C++ namespace boundary, semantic source paths, architecture image |
-| Solo development roadmap | DONE | `1d9e1cfb9be782b5e7ad44d21b41600f021fd597` | single-threaded project execution and feature gates |
-| Freestanding C++ compatibility fix | DONE | `7d8a66f4dbac12e6196d0fbbf3a28932647bbd0e` | `<stdint.h>`/`uintptr_t` source fix plus CMake compile-option cleanup; build and QEMU validated on the user's workstation |
-| M00-02 Complete RV64 TrapFrame | DONE | branch `milestone/m00-02-trap-frame`; `bash scripts/test-trap-frame.sh` on 2026-08-07 | complete x0-x31 + CSR frame, shared assembly/C++ ABI, save/restore path, known-register test, `TRAP_FRAME_TEST: PASS` |
-| M00-03 Recoverable trap and `mret` | DONE | branch `milestone/m00-03-recoverable-trap`; `bash scripts/test-recoverable-trap.sh` on 2026-08-07 | 32-bit `EBREAK` and 16-bit `C.EBREAK` both resume through common restore + `mret`; TrapFrame regression passed |
-| M00-04 Timer interrupt | ACTIVE | pending | first asynchronous machine-mode interrupt; timer source, enable path, dispatch, acknowledge/rearm, and resume |
-| M00-05 Per-hart state and stacks | NEXT | pending | required before multicore work |
-| M00-06 Privilege transition foundation | NEXT | pending | remains in firmware-first phase |
+| M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, `mtval` fatal path |
+| M00-02 Complete RV64 TrapFrame | DONE | `bash scripts/test-trap-frame.sh`; `TRAP_FRAME_TEST: PASS` | complete integer context, shared assembly/C++ ABI, common save/restore path |
+| M00-03 Recoverable trap and `mret` | DONE | `bash scripts/test-recoverable-trap.sh`; `RECOVERABLE_TRAP_TEST: PASS` | 32-bit `EBREAK` and 16-bit `C.EBREAK` resume through common restore + `mret` |
+| M00-04 Machine timer interrupt | DONE | branch `milestone/m00-04-timer-interrupt`; integrated to `main` by PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt; timer is serviced/rearmed without advancing saved `mepc` |
+| F00-01 Kernel print foundation | DONE | branch `feature/console-foundation`; `scripts/test-kernel-print.sh`; user-confirmed QEMU acceptance on 2026-08-07 | shared formatter, 36 KiB append-only kernel log, temporary UART mirror, `printk` |
+| Console/timer integration | ACTIVE | branch `integration/console-foundation` | preserve both timer and console paths; integrated acceptance requires all four foundation PASS markers |
+| M00-05 Per-hart state, stacks, SMP foundation | ACTIVE | pending | next code milestone after integration baseline is accepted |
+| M00-06 Privilege transition foundation | NEXT | pending | firmware-first privilege model |
 | M00-07 Early physical allocator | PLANNED | pending | supports later service/memory work |
-| M00-08 Structured event and trace ABI | PLANNED | pending | shared later with Jingjie |
-| M00-09 Automated QEMU test harness | PLANNED | pending | machine-checkable regression tests |
+| M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
+| M00-09 Automated QEMU test harness | PLANNED | pending | consolidate machine-checkable regression tests |
 
-## DONE: M00-02 Complete RV64 TrapFrame
+The temporary `Console/timer integration` row is repository-maintenance work, not a new architectural milestone. Remove or mark it DONE once the integration branch is merged.
 
-### Objective
+## Accepted foundation
 
-Create a precise, shared RV64 trap-context representation that can later support recoverable exceptions, interrupts, service isolation, context switching, vCPU state, debug, and RAS evidence.
+### M00-02 — TrapFrame
 
-### Completed work
-
-```text
-[x] study RISC-V trap-entry architectural state
-[x] define required saved registers and CSRs
-[x] define alignment and stack layout
-[x] define assembly/C++ shared offsets
-[x] implement complete save path
-[x] pass TrapFrame to C++ handler
-[x] implement complete restore path
-[x] create known-register-value test
-[x] record nesting and fatal-path policy
-[x] add machine-checkable QEMU test evidence
-[x] write design and learning notes
-```
-
-### Acceptance evidence
-
-- `TrapFrame` contains x0-x31, `mstatus`, `mepc`, `mcause`, and `mtval`.
-- RV64 frame size, alignment, and assembly/C++ offsets are compile-time checked.
-- Trap entry saves the complete integer context and trap restore reconstructs it before `mret`.
-- The known-register test validates fixed GPR patterns plus live `sp`, `gp`, and `tp` snapshots.
-- `bash scripts/test-trap-frame.sh` produced `TRAP_FRAME_TEST: PASS` on 2026-08-07.
-- Design record: `docs/JIXIA_M00_02_TRAP_FRAME.md`.
-
-## DONE: M00-03 Recoverable trap and `mret`
-
-### Objective
-
-Turn the previously fatal trap path into a deliberately recoverable path for explicitly recognized software breakpoint instructions while preserving fail-closed behavior for unsupported trap causes.
-
-### Completed work
+The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout. The known-register test produced:
 
 ```text
-[x] centralize XLEN and mcause masks
-[x] type exception and interrupt causes
-[x] distinguish interrupt-vs-exception before interpreting cause code
-[x] decode 16-bit versus 32-bit instruction length
-[x] recognize `C.EBREAK` and `EBREAK` encodings
-[x] recover only explicitly recognized breakpoint instructions
-[x] advance saved `mepc` by 2 or 4 as appropriate
-[x] return through trap restore and `mret`
-[x] observe successful 32-bit EBREAK resume in QEMU
-[x] observe successful 16-bit C.EBREAK resume in QEMU
-[x] retain M00-02 TrapFrame regression test
-[x] record dedicated `bash scripts/test-recoverable-trap.sh` PASS
+TRAP_FRAME_TEST: PASS
 ```
 
-### Design decisions
+Design record: `docs/JIXIA_M00_02_TRAP_FRAME.md`.
 
-- Trap recovery is whitelist-based: unsupported interrupts/exceptions remain fatal.
-- `TrapFrame` is the authoritative software recovery state; C++ modifies `frame.mepc`, and assembly writes it back to the `mepc` CSR.
-- `mcause` code alone is insufficient; the interrupt bit and code are interpreted together.
-- Cause code 3 is not assumed to mean an executable EBREAK instruction; the handler verifies the instruction at `mepc`.
-- Instruction length is decoded from the instruction stream; standard EBREAK advances by 4 and C.EBREAK by 2.
+### M00-03 — recoverable synchronous traps
 
-### Acceptance evidence
+Recovery is whitelist-based. The handler verifies `EBREAK` or `C.EBREAK` at saved `mepc`, advances by the decoded 4/2-byte length, and returns through the common restore + `mret` path.
 
-`bash scripts/test-recoverable-trap.sh` on 2026-08-07 produced:
+Recorded markers:
 
 ```text
 standard   : resumed after 32-bit EBREAK
 compressed : resumed after 16-bit C.EBREAK
 RECOVERABLE_TRAP_TEST: PASS
 TRAP_FRAME_TEST: PASS
-Recoverable trap test: PASS
 ```
 
-This proves both supported breakpoint lengths return through the common TrapFrame restore path and `mret`, while preserving the M00-02 TrapFrame regression.
+### M00-04 — machine timer interrupt
 
-## NOW: M00-04 Timer interrupt
+The timer path introduced the first asynchronous recoverable trap:
+
+```text
+mcause.interrupt = 1
+mcause.code      = 7
+```
+
+Key invariant: asynchronous timer handling does **not** advance saved `mepc`. The timer condition is serviced/rearmed before return through the same TrapFrame restore path.
+
+Source/test artifacts are retained on `main` after PR #6:
+
+```text
+microkernel/core/timer.{h,cpp}
+microkernel/core/timer_interrupt_test.cpp
+platform/qemu_virt/timer.{h,cpp}
+scripts/test-timer-interrupt.sh
+```
+
+### F00-01 — Kernel Print
+
+Accepted dependency split:
+
+```text
+printk
+   |
+shared freestanding formatter
+   |
+36 KiB append-only KernelLogBuffer
+   |
+   `---- temporary raw-UART mirror
+```
+
+The future runtime Console Service remains separate from this minimum kernel diagnostic path. See `docs/JIXIA_CONSOLE_DESIGN.md`.
+
+The kernel-print test validates exact formatting bytes and preserves the trap regressions. During repository integration it also checks the M00-04 timer marker:
+
+```text
+KERNEL_PRINT_TEST: PASS
+RECOVERABLE_TRAP_TEST: PASS
+MACHINE_TIMER_TEST: PASS
+TRAP_FRAME_TEST: PASS
+Kernel print test: PASS
+```
+
+## NOW — M00-05 Per-hart state, stacks, and SMP foundation
 
 ### Objective
 
-Add the first recoverable asynchronous trap: a machine timer interrupt that is deliberately armed, recognized as interrupt code 7, serviced, rearmed/acknowledged, and returned through the existing common TrapFrame restore and `mret` path.
+Move Mozi from a single boot hart to a correct multi-hart foundation without hard-coding socket topology into the microkernel.
+
+### First gate: integrated baseline
+
+Before changing SMP state, run on the integration branch:
+
+```bash
+bash scripts/test-kernel-print.sh
+bash scripts/test-timer-interrupt.sh
+```
+
+Both scripts must observe the integrated foundation without a fatal trap.
 
 ### Work breakdown
 
 ```text
-[ ] document QEMU virt timer source and MMIO/CSR contract used by this milestone
-[ ] define minimal timer hardware access abstraction
-[ ] program an initial timer deadline
-[ ] enable machine timer interrupt in `mie.MTIE`
-[ ] enable global machine interrupts in `mstatus.MIE`
-[ ] route machine timer interrupt through `TrapCause`
-[ ] service the timer and move the next deadline forward before return
-[ ] prove `mepc` is not artificially advanced for an asynchronous interrupt
-[ ] prove normal code resumes after `mret`
-[ ] add machine-checkable timer interrupt test
-[ ] preserve M00-02 and M00-03 regression tests
-[ ] record GDB/CSR evidence and design notes
+[ ] define maximum/boot-time hart representation without assuming socket numbering
+[ ] define per-hart boot/trap stack ownership and alignment
+[ ] make secondary harts use private stacks before entering C++
+[ ] make exactly one boot hart perform global BSS/global initialization
+[ ] define boot-hart -> secondary-hart release/rendezvous protocol
+[ ] state RISC-V/C++ memory-order and fence requirements for release/observe
+[ ] add HartLocal/per-hart runtime state
+[ ] bring up multiple QEMU harts and prove unique per-hart state
+[ ] define printk policy before allowing concurrent writers
+[ ] retain M00-02/M00-03/M00-04/F00-01 regressions
+[ ] separate hart identity from PlatformGraph socket/core/NUMA topology
+[ ] add machine-checkable SMP acceptance evidence
 ```
 
 ### Initial invariants
 
-- `mcause` must be interpreted as **interrupt=true, code=7**; code 7 without the interrupt bit is a different trap.
-- A timer interrupt is asynchronous, so the handler must not apply the breakpoint rule that advances `mepc` by an instruction length.
-- The pending timer condition must be cleared/rearmed before returning, otherwise `mret` can immediately retrap.
-- `trap.S` remains the common entry/restore mechanism unless evidence requires an architectural change.
-- M00-04 stays single-hart; per-hart timer/state structure belongs to M00-05.
+- a hart must never execute C/C++ on another hart's stack;
+- secondary harts must not race the boot hart's BSS/global initialization;
+- publication of global initialization completion must have an explicit memory-order contract;
+- hart ID is an architectural identifier, not a formula for socket/core/NUMA identity;
+- physical topology belongs to PlatformGraph;
+- avoid global shared mutable state where per-hart ownership is sufficient;
+- do not add an ad-hoc spinlock simply to make `printk` appear SMP-safe; establish the required ownership/synchronization contract first.
+
+Concurrency rules: `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`.
 
 ## NEXT queue
 
-1. `M00-05 Per-hart state and stacks`
-2. `M00-06 Privilege transition foundation`
-3. `M00-07 Early physical allocator`
+1. `M00-06 Privilege transition foundation`
+2. `M00-07 Early physical allocator`
+3. `M00-08 Structured event and trace ABI`
 
-Only one becomes ACTIVE at a time.
+Only one architectural milestone is ACTIVE at a time.
 
 ## Frozen implementation areas
-
-These remain architecture/documentation topics, not current code tasks:
 
 ```text
 FROZEN  ArchHV and LPAR runtime
@@ -172,75 +179,52 @@ FROZEN  simulator-dependent partition hardware experiments
 
 They are released only through the gates in `docs/JIXIA_SOLO_ROADMAP.md`.
 
-## Progress update protocol
+## Branch/integration rule
 
-When a milestone is completed, append a dated record using this template:
+Completed milestones and accepted foundational features should be merged into `main` promptly. New major work starts from the latest integrated baseline.
 
-```markdown
-### YYYY-MM-DD — <milestone> completed
-
-- Status: DONE
-- Branch/PR:
-- Commit:
-- Test command:
-- Test result:
-- What was learned:
-- Design decisions:
-- Known limitations:
-- Documentation updated:
-- Next ACTIVE milestone:
+```text
+main
+  |
+  +-- milestone/feature branch
+          |
+          +-- implementation
+          +-- test evidence
+          +-- design record
+          |
+          `-- merge back to main
 ```
 
-Then update:
-
-1. the milestone ledger above;
-2. the NOW section;
-3. `PROJECT_CONTEXT.md` if the active milestone or architecture direction changed;
-4. relevant design and learning notes.
+Do not build a long chain of completed milestone branches while leaving `main` stale.
 
 ## Progress history
 
-### 2026-08-07 — M00-03 Recoverable trap and `mret` completed
+### 2026-08-07 — repository baseline consolidation
+
+- M00-02, M00-03, and M00-04 were integrated into `main` through PR #6 (`d33111c2beb1e360bb057747f8b1c7dda34dc773`).
+- Console/Kernel Print is being integrated on `integration/console-foundation` rather than blindly merging the diverged feature branch.
+- Conflict resolution preserves both timer and console code paths.
+- Kernel, recoverable-trap, machine-timer, and TrapFrame test output is routed through the accepted kernel print path.
+- The next architectural milestone is M00-05 SMP/per-hart foundation.
+
+### 2026-08-07 — F00-01 Kernel Print accepted
 
 - Status: DONE
-- Branch: `milestone/m00-03-recoverable-trap`
-- Test command: `bash scripts/test-recoverable-trap.sh`
-- Test result: standard 32-bit EBREAK resumed, 16-bit C.EBREAK resumed, `RECOVERABLE_TRAP_TEST: PASS`, `TRAP_FRAME_TEST: PASS`, and final `Recoverable trap test: PASS`.
-- What was learned: trap recovery is a software policy over saved architectural state; `mret` consumes the CSR state restored from the TrapFrame, and synchronous breakpoint recovery must distinguish instruction encoding/length from the trap cause itself.
-- Design decisions: keep recovery whitelist-based, verify EBREAK/C.EBREAK at `mepc`, keep TrapFrame authoritative, and reuse one assembly restore path.
-- Known limitations: no asynchronous interrupt handling yet, no per-hart trap stack/state, no nested-trap policy.
-- Documentation updated: this ledger and `PROJECT_CONTEXT.md`.
-- Next ACTIVE milestone: `M00-04 Timer interrupt`.
+- Original branch: `feature/console-foundation`
+- Acceptance: user confirmed the kernel-print QEMU test passed on the development workstation.
+- Design decisions: kernel log is authoritative; UART is a bring-up mirror; future service console is a separate failure/runtime domain.
 
-### 2026-08-07 — M00-02 Complete RV64 TrapFrame completed
+### 2026-08-07 — M00-03 Recoverable trap completed
 
-- Status: DONE
-- Branch: `milestone/m00-02-trap-frame`
-- Test command: `bash scripts/test-trap-frame.sh`
-- Test result: `TRAP_FRAME_TEST: PASS`
-- Regression observation: the same firmware run also showed successful standard EBREAK and C.EBREAK resume before the TrapFrame test.
-- What was learned: the trap frame is a software ABI between trap assembly and higher-level policy; hardware knows only architectural registers/CSRs, not the C++ `TrapFrame` type.
-- Design decisions: save the full integer context, keep `sp` restoration last, make the saved frame the authoritative recovery state, and keep unsupported/nested behavior fail-closed for now.
-- Known limitations: no dedicated per-hart trap stack or nested-trap policy yet.
-- Documentation updated: `docs/JIXIA_M00_02_TRAP_FRAME.md`, this ledger.
-- Next ACTIVE milestone: `M00-03 Recoverable trap and mret`.
+- Test: `bash scripts/test-recoverable-trap.sh`
+- Result: standard and compressed breakpoints resumed, `RECOVERABLE_TRAP_TEST: PASS`, `TRAP_FRAME_TEST: PASS`.
 
-### 2026-08-05 — freestanding C++ compatibility and QEMU revalidation
+### 2026-08-07 — M00-02 TrapFrame completed
 
-- Status: DONE
-- Source fix: replace `<cstdint>`/`std::uintptr_t` with `<stdint.h>`/`uintptr_t` in `firmware_main.cpp` and `trap.cpp`.
-- Build result: passed on the user's Ubuntu workstation with `riscv64-unknown-elf-gcc/g++`.
-- Run command: `./scripts/run-qemu.sh`.
-- QEMU result: Jixia entered the microkernel and intentionally executed a 32-bit `EBREAK`.
-- Observed state: `mcause=3`, `mepc=0x00000000800000ee`, `mtval=0`, confirming the expected breakpoint exception path.
-- Decision: the two-source-file change is the necessary and sufficient root-cause fix for the missing `<cstdint>` header. The CMake change in the merged build fix is retained as an independent compile-option cleanup, not as a prerequisite for solving the header error.
-- Limitation: the trap path remained fatal and non-resumable at that point.
+- Test: `bash scripts/test-trap-frame.sh`
+- Result: `TRAP_FRAME_TEST: PASS`.
 
-### 2026-08-05 — solo development process established
+### 2026-08-05 — project execution process established
 
-- Status: DONE
-- Branch: `roadmap/solo-development`
-- Roadmap commit: `1d9e1cfb9be782b5e7ad44d21b41600f021fd597`
-- Decision: one active milestone at a time; no parallel major subsystem development.
-- LPAR implementation moved behind the Jingjie simulator prerequisite gate.
-- Persistent records: `PROJECT_CONTEXT.md`, `docs/JIXIA_SOLO_ROADMAP.md`, and this progress ledger.
+- One primary architectural milestone at a time.
+- Persistent records: `PROJECT_CONTEXT.md`, `docs/JIXIA_SOLO_ROADMAP.md`, and this ledger.
