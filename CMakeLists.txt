@@ -20,16 +20,28 @@ set(JIXIA_ARCH_FLAGS
     -mcmodel=medany
 )
 
+set(JIXIA_LINKER_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
+)
+
 add_executable(
     jixia.elf
 
+    # Keep the architectural entry source first for readability. The linker
+    # script independently pins .text.boot at 0x80000000, so correctness does
+    # not depend on this source-list ordering.
     microkernel/arch/riscv/start.S
     microkernel/arch/riscv/trap.S
     microkernel/arch/riscv/trap_frame_test.S
     microkernel/arch/riscv/instruction_decode.cpp
+
+    lib/format.cpp
+    microkernel/console/kernel_console.cpp
+    microkernel/console/printk.cpp
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
     microkernel/core/timer.cpp
+    microkernel/core/kernel_print_test.cpp
     microkernel/core/recoverable_trap_test.cpp
     microkernel/core/timer_interrupt_test.cpp
     microkernel/core/trap_frame_test.cpp
@@ -80,7 +92,15 @@ target_link_options(
         -Wl,--build-id=none
         -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia.map
 
-        -T${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
+        -T${JIXIA_LINKER_SCRIPT}
+)
+
+# A linker script passed only with -T is not a reliable Ninja dependency on
+# every CMake/toolchain combination. Make it explicit so changing the firmware
+# memory layout always forces a relink.
+set_property(
+    TARGET jixia.elf
+    APPEND PROPERTY LINK_DEPENDS ${JIXIA_LINKER_SCRIPT}
 )
 
 add_custom_command(
