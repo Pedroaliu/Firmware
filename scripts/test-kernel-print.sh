@@ -44,9 +44,9 @@ resolve_build_path()
 
 readonly BUILD_PATH="$(resolve_build_path "${1:-}")"
 readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
-readonly SERIAL_LOG="${BUILD_PATH}/timer-interrupt-test.serial.log"
-readonly LOG_FILE="${BUILD_PATH}/timer-interrupt-test.log"
-readonly QEMU_ERROR_LOG="${BUILD_PATH}/timer-interrupt-test.qemu.log"
+readonly SERIAL_LOG="${BUILD_PATH}/kernel-print-test.serial.log"
+readonly LOG_FILE="${BUILD_PATH}/kernel-print-test.log"
+readonly QEMU_ERROR_LOG="${BUILD_PATH}/kernel-print-test.qemu.log"
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
@@ -84,37 +84,46 @@ if [[ ${QEMU_STATUS} -ne 124 ]]; then
     if [[ -s "${QEMU_ERROR_LOG}" ]]; then
         cat "${QEMU_ERROR_LOG}" >&2
     fi
-    echo "Machine timer test: unexpected QEMU status ${QEMU_STATUS}" >&2
+    echo "Kernel print test: unexpected QEMU status ${QEMU_STATUS}" >&2
     exit 1
 fi
 
 if grep -Fq "[Jixia][Microkernel][fatal trap]" "${LOG_FILE}"; then
-    echo "Machine timer test: fatal trap observed" >&2
+    echo "Kernel print test: fatal trap observed" >&2
     exit 1
 fi
 
 if grep -Fq "KERNEL_PRINT_TEST: FAIL" "${LOG_FILE}"; then
-    echo "Kernel print regression: FAIL" >&2
+    echo "Kernel print test: FAIL" >&2
     exit 1
 fi
 
 if grep -Fq "MACHINE_TIMER_TEST: FAIL" "${LOG_FILE}"; then
-    echo "Machine timer test: FAIL" >&2
+    echo "M00-04 regression: FAIL" >&2
+    exit 1
+fi
+
+if ! grep -Fxq \
+    "probe      : s=ok d=-42 u=42 x=00001a2b p=0x0000000000001234 %" \
+    "${LOG_FILE}"; then
+    echo "Kernel print test: exact formatting probe not found" >&2
+    exit 1
+fi
+
+if ! grep -Fxq \
+    "buffer     : append-only kernel log retained exact probe" \
+    "${LOG_FILE}"; then
+    echo "Kernel print test: buffer validation marker not found" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "capacity   : 36864 bytes" "${LOG_FILE}"; then
+    echo "Kernel print test: capacity marker not found" >&2
     exit 1
 fi
 
 if ! grep -Fxq "KERNEL_PRINT_TEST: PASS" "${LOG_FILE}"; then
-    echo "Kernel print regression: PASS marker not found" >&2
-    exit 1
-fi
-
-if ! grep -Fxq "interrupt  : machine timer observed and returned" "${LOG_FILE}"; then
-    echo "Machine timer test: interrupt/resume marker not found" >&2
-    exit 1
-fi
-
-if ! grep -Fxq "MACHINE_TIMER_TEST: PASS" "${LOG_FILE}"; then
-    echo "Machine timer test: PASS marker not found" >&2
+    echo "Kernel print test: PASS marker not found" >&2
     exit 1
 fi
 
@@ -123,9 +132,14 @@ if ! grep -Fxq "RECOVERABLE_TRAP_TEST: PASS" "${LOG_FILE}"; then
     exit 1
 fi
 
+if ! grep -Fxq "MACHINE_TIMER_TEST: PASS" "${LOG_FILE}"; then
+    echo "M00-04 regression: PASS marker not found" >&2
+    exit 1
+fi
+
 if ! grep -Fxq "TRAP_FRAME_TEST: PASS" "${LOG_FILE}"; then
     echo "M00-02 regression: PASS marker not found" >&2
     exit 1
 fi
 
-echo "Machine timer test: PASS"
+echo "Kernel print test: PASS"

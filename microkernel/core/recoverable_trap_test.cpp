@@ -1,22 +1,22 @@
-#include "uart.h"
+#include "microkernel/console/printk.h"
 
 namespace jixia::microkernel::trap_test {
 
 void run_recoverable_trap_test()
 {
-    uart_puts("\n[Jixia][Test][RecoverableTrap]\n");
+    printk("\n[Jixia][Test][RecoverableTrap]\n");
 
     /*
      * Use explicit encodings so the test controls instruction length exactly.
      * EBREAK must resume at the instruction immediately following these bytes.
      */
     __asm__ volatile(".word 0x00100073" ::: "memory");
-    uart_puts("standard   : resumed after 32-bit EBREAK\n");
+    printk("standard   : resumed after 32-bit EBREAK\n");
 
     __asm__ volatile(".hword 0x9002" ::: "memory");
-    uart_puts("compressed : resumed after 16-bit C.EBREAK\n");
+    printk("compressed : resumed after 16-bit C.EBREAK\n");
 
-    uart_puts("RECOVERABLE_TRAP_TEST: PASS\n");
+    printk("RECOVERABLE_TRAP_TEST: PASS\n");
 }
 
 } // namespace jixia::microkernel::trap_test

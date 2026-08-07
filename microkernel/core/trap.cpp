@@ -3,8 +3,8 @@
 #include "microkernel/arch/riscv/instruction_decode.h"
 #include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
+#include "microkernel/console/printk.h"
 #include "microkernel/core/timer.h"
-#include "uart.h"
 
 extern "C" int jixia_trap_frame_test_is_active();
 extern "C" [[noreturn]]
@@ -27,43 +27,27 @@ using jixia::arch::riscv::instruction_length_bytes;
     const TrapCause cause{frame.mcause};
     const Xlen cause_code = cause.code();
 
-    uart_puts("\n");
-    uart_puts("[Jixia][Microkernel][fatal trap]\n");
-
-    uart_puts("frame     : ");
-    uart_put_hex_uintptr(reinterpret_cast<uintptr_t>(&frame));
-    uart_puts("\n");
-
-    uart_puts("kind      : ");
-    uart_puts(cause.is_interrupt() ? "interrupt\n" : "exception\n");
-
-    uart_puts("mstatus   : ");
-    uart_put_hex_uintptr(frame.mstatus);
-    uart_puts("\n");
-
-    uart_puts("mcause    : ");
-    uart_put_hex_uintptr(frame.mcause);
-    uart_puts("\n");
-
-    uart_puts("code      : ");
-    uart_put_hex_uintptr(cause_code);
-    uart_puts("\n");
-
-    uart_puts("mepc      : ");
-    uart_put_hex_uintptr(frame.mepc);
-    uart_puts("\n");
-
-    uart_puts("mtval     : ");
-    uart_put_hex_uintptr(frame.mtval);
-    uart_puts("\n");
-
-    uart_puts("saved sp  : ");
-    uart_put_hex_uintptr(frame.x[2]);
-    uart_puts("\n");
-
-    uart_puts("saved ra  : ");
-    uart_put_hex_uintptr(frame.x[1]);
-    uart_puts("\n");
+    printk(
+        "\n"
+        "[Jixia][Microkernel][fatal trap]\n"
+        "frame     : %p\n"
+        "kind      : %s\n"
+        "mstatus   : %p\n"
+        "mcause    : %p\n"
+        "code      : %lu\n"
+        "mepc      : %p\n"
+        "mtval     : %p\n"
+        "saved sp  : %p\n"
+        "saved ra  : %p\n",
+        static_cast<void*>(const_cast<TrapFrame*>(&frame)),
+        cause.is_interrupt() ? "interrupt" : "exception",
+        reinterpret_cast<void*>(frame.mstatus),
+        reinterpret_cast<void*>(frame.mcause),
+        static_cast<unsigned long>(cause_code),
+        reinterpret_cast<void*>(frame.mepc),
+        reinterpret_cast<void*>(frame.mtval),
+        reinterpret_cast<void*>(frame.x[2]),
+        reinterpret_cast<void*>(frame.x[1]));
 
     for (;;)
     {

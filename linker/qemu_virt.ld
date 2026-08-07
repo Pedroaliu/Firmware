@@ -16,16 +16,29 @@ SECTIONS
 {
     . = ORIGIN(RAM);
 
-    .text : ALIGN(4096) {
+    .text : ALIGN(4096)
+    {
         __text_start = .;
 
-        KEEP(*(.text))
+        /*
+         * jixia.bin is a raw firmware image. QEMU virt loads it at
+         * 0x80000000 and its reset ROM transfers control to that fixed
+         * address; the raw image carries no ELF e_entry metadata.
+         *
+         * Keep the boot section first so _start is always the first
+         * instruction in the image, independent of compiler/linker input
+         * section ordering as the firmware grows.
+         */
+        KEEP(*(.text.boot))
 
         *(.text)
         *(.text.*)
 
         __text_end = .;
     } > RAM :text
+
+    ASSERT(_start == ORIGIN(RAM),
+           "Jixia firmware _start must remain at RAM origin 0x80000000")
 
     .rodata : ALIGN(4096)
     {
@@ -44,8 +57,8 @@ SECTIONS
         __data_start = .;
 
         /*
-         * RISC-V可通过gp访问small data。
-         * 后面的start.S会显式初始化gp。
+         * RISC-V can address small data through gp. start.S initializes gp
+         * explicitly before entering C++ code.
          */
         PROVIDE(__global_pointer$ = . + 0x800);
 
@@ -57,7 +70,7 @@ SECTIONS
         __data_end = .;
     } > RAM :data
 
-     .bss (NOLOAD) : ALIGN(16)
+    .bss (NOLOAD) : ALIGN(16)
     {
         __bss_start = .;
 
@@ -75,7 +88,7 @@ SECTIONS
         __stack_bottom = .;
 
         /*
-         * M00暂时只有一个Boot Hart。
+         * M00 currently has one boot hart.
          */
         . += 16K;
 
