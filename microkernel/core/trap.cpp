@@ -37,7 +37,7 @@ using jixia::arch::riscv::instruction_length_bytes;
         "mtval     : %p\n"
         "saved sp  : %p\n"
         "saved ra  : %p\n",
-        static_cast<const void*>(&frame),
+        static_cast<void*>(const_cast<TrapFrame*>(&frame)),
         cause.is_interrupt() ? "interrupt" : "exception",
         reinterpret_cast<void*>(frame.mstatus),
         reinterpret_cast<void*>(frame.mcause),
