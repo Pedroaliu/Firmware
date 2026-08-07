@@ -29,8 +29,11 @@ add_executable(
     microkernel/arch/riscv/instruction_decode.cpp
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
+    microkernel/core/timer.cpp
     microkernel/core/recoverable_trap_test.cpp
+    microkernel/core/timer_interrupt_test.cpp
     microkernel/core/trap_frame_test.cpp
+    platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
 )
 
