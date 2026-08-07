@@ -9,7 +9,7 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-03-recoverable-trap`
+- **Current progress branch:** `milestone/m00-04-timer-interrupt`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -144,6 +144,7 @@ Completed:
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
 - `M00-02`: complete RV64 integer `TrapFrame`, shared assembly/C++ ABI, full save/restore path, known-register test, machine-checkable `TRAP_FRAME_TEST: PASS`.
+- `M00-03`: recoverable software breakpoints; `EBREAK` and `C.EBREAK` are verified at `mepc`, saved `mepc` advances by the decoded 4/2-byte length, and both return through the common restore path and `mret`; dedicated QEMU regression passed on 2026-08-07.
 - build artifacts renamed from `archfw.*` to `jixia.*`.
 - executable implementation moved to semantic `microkernel/` paths.
 - low-level C ABI enters freestanding C++ code under `jixia::microkernel`.
@@ -153,13 +154,13 @@ Completed:
 Current queue:
 
 ```text
-ACTIVE  M00-03 Recoverable trap and mret
-NEXT    M00-04 Timer interrupt
+ACTIVE  M00-04 Timer interrupt
 NEXT    M00-05 Per-hart state and stacks
 NEXT    M00-06 Privilege transition foundation
+NEXT    M00-07 Early physical allocator
 ```
 
-M00-03 implementation currently recognizes synchronous breakpoint exceptions, verifies `EBREAK`/`C.EBREAK` at `mepc`, advances the saved resume PC by the decoded instruction length, and returns through the common restore path and `mret`. QEMU has demonstrated successful resume for both 32-bit EBREAK and 16-bit C.EBREAK. The remaining close-out gate is a final dedicated machine-checkable `scripts/test-recoverable-trap.sh` PASS recorded in `docs/JIXIA_PROGRESS.md`.
+M00-04 is the first asynchronous-trap milestone. It must deliberately arm the QEMU virt timer source, enable the machine timer interrupt path, recognize `mcause` as interrupt=true/code=7, service and rearm the timer before returning, preserve the saved `mepc` rather than applying synchronous-exception PC advancement, and resume through the existing common TrapFrame restore + `mret` path. This milestone remains single-hart; per-hart timer/state structures are deferred to M00-05.
 
 Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
 
