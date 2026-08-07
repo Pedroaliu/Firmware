@@ -52,7 +52,9 @@ void handle_interrupt()
      */
     disable_machine_timer_interrupt();
     jixia::platform::qemu_virt::timer::disarm();
-    ++machine_timer_interrupt_count;
+
+    const uintptr_t next_count = machine_timer_interrupt_count + 1U;
+    machine_timer_interrupt_count = next_count;
 }
 
 void disable_global_interrupts()
