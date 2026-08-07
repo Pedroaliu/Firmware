@@ -98,6 +98,11 @@ if grep -Fq "KERNEL_PRINT_TEST: FAIL" "${LOG_FILE}"; then
     exit 1
 fi
 
+if grep -Fq "MACHINE_TIMER_TEST: FAIL" "${LOG_FILE}"; then
+    echo "M00-04 regression: FAIL" >&2
+    exit 1
+fi
+
 if ! grep -Fxq \
     "probe      : s=ok d=-42 u=42 x=00001a2b p=0x0000000000001234 %" \
     "${LOG_FILE}"; then
@@ -124,6 +129,11 @@ fi
 
 if ! grep -Fxq "RECOVERABLE_TRAP_TEST: PASS" "${LOG_FILE}"; then
     echo "M00-03 regression: PASS marker not found" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "MACHINE_TIMER_TEST: PASS" "${LOG_FILE}"; then
+    echo "M00-04 regression: PASS marker not found" >&2
     exit 1
 fi
 
