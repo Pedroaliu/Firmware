@@ -3,7 +3,7 @@
 #include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "microkernel/arch/riscv/trap_frame_test_values.h"
-#include "uart.h"
+#include "microkernel/console/console.h"
 
 extern "C" {
 volatile uintptr_t jixia_trap_test_active = 0;
@@ -40,13 +40,10 @@ bool check_value(
         return true;
     }
 
-    uart_puts("mismatch  : ");
-    uart_puts(field);
-    uart_puts("\nexpected  : ");
-    uart_put_hex_uintptr(expected);
-    uart_puts("\nactual    : ");
-    uart_put_hex_uintptr(actual);
-    uart_puts("\n");
+    console::out
+        << "mismatch  : " << field << '\n'
+        << "expected  : " << console::hex(expected) << '\n'
+        << "actual    : " << console::hex(actual) << '\n';
     return false;
 }
 
@@ -60,13 +57,10 @@ bool check_gpr(
         return true;
     }
 
-    uart_puts("gpr index : ");
-    uart_put_hex_uintptr(index);
-    uart_puts("\nexpected  : ");
-    uart_put_hex_uintptr(expected);
-    uart_puts("\nactual    : ");
-    uart_put_hex_uintptr(actual);
-    uart_puts("\n");
+    console::out
+        << "gpr index : " << console::hex(index) << '\n'
+        << "expected  : " << console::hex(expected) << '\n'
+        << "actual    : " << console::hex(actual) << '\n';
     return false;
 }
 
@@ -74,7 +68,7 @@ bool check_gpr(
 {
     const TrapCause cause{frame.mcause};
 
-    uart_puts("\n[Jixia][Test][TrapFrame]\n");
+    console::out << "\n[Jixia][Test][TrapFrame]\n";
 
     bool passed = true;
 
@@ -114,10 +108,10 @@ bool check_gpr(
         cause.code());
     passed &= check_value("mtval", 0U, frame.mtval);
 
-    uart_puts(
-        passed
-            ? "TRAP_FRAME_TEST: PASS\n"
-            : "TRAP_FRAME_TEST: FAIL\n");
+    console::out
+        << (passed
+                ? "TRAP_FRAME_TEST: PASS\n"
+                : "TRAP_FRAME_TEST: FAIL\n");
 
     for (;;)
     {
