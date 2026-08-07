@@ -151,6 +151,13 @@ Completed:
 - architecture overview and persistent project/source records established.
 - solo-development roadmap and progress-recording process established.
 
+Supporting foundation currently implemented on the M00-04 branch, pending workstation/QEMU validation:
+
+- `docs/JIXIA_CONSOLE_DESIGN.md` defines the console/output architecture after comparison with Hostboot, EDK II, seL4, and NXP debug-console approaches.
+- `microkernel/console/` provides a freestanding `ConsoleSink`, fixed-capacity router, 36 KiB memory ring, normal/emergency routes, lightweight integer/hex formatting, and `console::out << ...` frontend without `std::iostream`.
+- `platform/qemu_virt/console.cpp` registers the polling UART as an early/panic-safe backend while preserving raw UART below the router for pre-console fatal/bring-up use.
+- Console and future structured logging/RAS share transport infrastructure but remain separate semantic layers; complex screen/SOL transports must not become mandatory microkernel mechanisms.
+
 Current queue:
 
 ```text
@@ -226,9 +233,12 @@ The Firmware repository is never interchangeable with similarly named simulator 
 - BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
 - Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
 - One active milestone at a time is a deliberate learning and quality strategy.
+- Console formatting, routing, and transport are separate. UART, memory, future screen/SOL, and Jingjie are sinks/backends; `console::out` is only a frontend.
+- Raw polling output remains below the normal console stack for reset/pre-console fatal paths. Panic-safe sinks must not depend on heap, scheduler, normal locks, or asynchronous completion.
+- Human-readable console text must not become the structured RAS/event ABI.
 
 ## 11. Maintenance
 
-Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, or learning/implementation workflow change.
+Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, console/logging architecture, or learning/implementation workflow change.
 
 Routine test results and milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
