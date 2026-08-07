@@ -1,7 +1,9 @@
 #include <stdint.h>
 
-#include "uart.h"
+#include "microkernel/console/kernel_console.h"
+#include "microkernel/console/printk.h"
 
+extern "C" void jixia_kernel_print_test();
 extern "C" void jixia_recoverable_trap_test();
 extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
@@ -10,24 +12,24 @@ namespace jixia::microkernel {
 
 [[noreturn]] void main(uintptr_t hart_id, uintptr_t dtb_address)
 {
-    uart_puts("\n");
-    uart_puts("Jixia M00\n");
-    uart_puts("hart        : ");
-    uart_put_hex_uintptr(hart_id);
-    uart_puts("\n");
+    kernel_console::set_uart_mirror(true);
 
-    uart_puts("dtb         : ");
-    uart_put_hex_uintptr(dtb_address);
-    uart_puts("\n");
-
-    uart_puts("microkernel : entered (codename: Mozi)\n");
-    uart_puts("trap test   : recoverable exceptions and machine timer\n");
+    printk(
+        "\n"
+        "Jixia M00\n"
+        "hart        : %p\n"
+        "dtb         : %p\n"
+        "microkernel : entered (codename: Mozi)\n"
+        "printk      : kernel buffer + raw UART mirror\n"
+        "trap test   : recoverable exceptions and machine timer\n",
+        reinterpret_cast<void*>(hart_id),
+        reinterpret_cast<void*>(dtb_address));
 
     /*
-     * Keep prior milestones as live regressions. M00-04 adds the first
-     * asynchronous interrupt between the recoverable-breakpoint test and the
-     * final TrapFrame capture test, which parks the hart after validation.
+     * Keep the completed foundations as live regressions. The final TrapFrame
+     * capture test parks the hart after validation, so it remains last.
      */
+    jixia_kernel_print_test();
     jixia_recoverable_trap_test();
     jixia_machine_timer_test();
     jixia_trap_frame_test();
