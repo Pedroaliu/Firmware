@@ -9,7 +9,7 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `roadmap/solo-development`
+- **Current progress branch:** `milestone/m00-03-recoverable-trap`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -19,7 +19,7 @@ IBM POWER/PowerVM/LPAR and System z/CECSIM are studied as alternative systems pe
 
 ## 2. Development mode
 
-The project currently has one human developer working with ChatGPT as a research, teaching, architecture, review, and debugging partner.
+The project currently has one human developer working with ChatGPT as a research, teaching, architecture, review, debugging, and implementation partner.
 
 The project is intentionally single-threaded:
 
@@ -43,6 +43,16 @@ When a milestone is completed, the progress ledger records:
 - the next ACTIVE milestone.
 
 A milestone is not complete merely because code exists.
+
+### Learning/implementation workflow
+
+The current teaching workflow deliberately separates syntax fluency from systems reasoning:
+
+- ChatGPT may provide and commit complete reference implementations for syntax-heavy or repetitive scaffolding.
+- The developer is expected to understand the architectural state transitions, invariants, failure modes, and debugging evidence behind those implementations.
+- New mechanisms are taught through complete reference code first, then explanation, guided modification, and progressively larger independent implementation tasks.
+- Debugging should prefer observable evidence (GDB, CSR/register state, disassembly, QEMU logs, tests) over guessing.
+- The pace should remain milestone-driven: do not turn every syntax detail into a separate blocking exercise.
 
 ## 3. Naming policy
 
@@ -74,6 +84,7 @@ For confidential computing, keep the technical name **Confidential LPAR** until 
 - Minimum reset/assembly boundaries remain C-compatible.
 - Cross-language symbols use stable `jixia_` C ABI names.
 - Freestanding implementation code uses C++ nested namespaces.
+- Local assembly macros and internal layout constants use concise semantic names without redundant project branding.
 - Do not encode codenames into public symbols, file paths, data schemas, or protocols.
 
 Examples:
@@ -132,6 +143,7 @@ Completed:
 
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
+- `M00-02`: complete RV64 integer `TrapFrame`, shared assembly/C++ ABI, full save/restore path, known-register test, machine-checkable `TRAP_FRAME_TEST: PASS`.
 - build artifacts renamed from `archfw.*` to `jixia.*`.
 - executable implementation moved to semantic `microkernel/` paths.
 - low-level C ABI enters freestanding C++ code under `jixia::microkernel`.
@@ -141,11 +153,13 @@ Completed:
 Current queue:
 
 ```text
-ACTIVE  M00-02 Complete RV64 TrapFrame
-NEXT    M00-03 Recoverable trap and mret
+ACTIVE  M00-03 Recoverable trap and mret
 NEXT    M00-04 Timer interrupt
 NEXT    M00-05 Per-hart state and stacks
+NEXT    M00-06 Privilege transition foundation
 ```
+
+M00-03 implementation currently recognizes synchronous breakpoint exceptions, verifies `EBREAK`/`C.EBREAK` at `mepc`, advances the saved resume PC by the decoded instruction length, and returns through the common restore path and `mret`. QEMU has demonstrated successful resume for both 32-bit EBREAK and 16-bit C.EBREAK. The remaining close-out gate is a final dedicated machine-checkable `scripts/test-recoverable-trap.sh` PASS recorded in `docs/JIXIA_PROGRESS.md`.
 
 Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
 
@@ -214,6 +228,6 @@ The Firmware repository is never interchangeable with similarly named simulator 
 
 ## 11. Maintenance
 
-Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, or trust assumptions change.
+Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, or learning/implementation workflow change.
 
 Routine test results and milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
