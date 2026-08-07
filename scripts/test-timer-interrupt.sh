@@ -93,8 +93,18 @@ if grep -Fq "[Jixia][Microkernel][fatal trap]" "${LOG_FILE}"; then
     exit 1
 fi
 
+if grep -Fq "KERNEL_PRINT_TEST: FAIL" "${LOG_FILE}"; then
+    echo "Kernel print regression: FAIL" >&2
+    exit 1
+fi
+
 if grep -Fq "MACHINE_TIMER_TEST: FAIL" "${LOG_FILE}"; then
     echo "Machine timer test: FAIL" >&2
+    exit 1
+fi
+
+if ! grep -Fxq "KERNEL_PRINT_TEST: PASS" "${LOG_FILE}"; then
+    echo "Kernel print regression: PASS marker not found" >&2
     exit 1
 fi
 
