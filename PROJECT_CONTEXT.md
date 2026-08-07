@@ -9,7 +9,8 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-04-timer-interrupt`
+- **Current progress branch:** `feature/console-foundation`
+- **Parked timer branch:** `milestone/m00-04-timer-interrupt` at `299aff177497399236a848724b56c2e040ce4db4`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -24,7 +25,7 @@ The project currently has one human developer working with ChatGPT as a research
 The project is intentionally single-threaded:
 
 ```text
-NOW      exactly one primary milestone
+NOW      exactly one primary feature/milestone
 NEXT     at most three ordered milestones
 BACKLOG  accepted later work
 FROZEN   work blocked by architectural prerequisites
@@ -32,27 +33,18 @@ FROZEN   work blocked by architectural prerequisites
 
 The canonical execution plan is `docs/JIXIA_SOLO_ROADMAP.md`. The canonical live status is `docs/JIXIA_PROGRESS.md`.
 
-When a milestone is completed, the progress ledger records:
-
-- commit or pull request;
-- test command and result;
-- what was learned;
-- design decisions;
-- known limitations;
-- documentation changes;
-- the next ACTIVE milestone.
-
-A milestone is not complete merely because code exists.
+A feature or milestone is not complete merely because code exists. Completion requires test evidence and a recorded design/learning result.
 
 ### Learning/implementation workflow
 
 The current teaching workflow deliberately separates syntax fluency from systems reasoning:
 
-- ChatGPT may provide and commit complete reference implementations for syntax-heavy or repetitive scaffolding.
-- The developer is expected to understand the architectural state transitions, invariants, failure modes, and debugging evidence behind those implementations.
+- ChatGPT may provide and commit complete reference implementations for syntax-heavy, repetitive, or foundational scaffolding.
+- The developer is expected to understand the architectural state transitions, invariants, failure modes, and debugging evidence behind core mechanisms.
 - New mechanisms are taught through complete reference code first, then explanation, guided modification, and progressively larger independent implementation tasks.
 - Debugging should prefer observable evidence (GDB, CSR/register state, disassembly, QEMU logs, tests) over guessing.
 - The pace should remain milestone-driven: do not turn every syntax detail into a separate blocking exercise.
+- Independent facilities should use independent branches and acceptance evidence; do not hide a large Console/platform feature inside an unrelated timer milestone.
 
 ## 3. Naming policy
 
@@ -92,6 +84,7 @@ Examples:
 ```cpp
 namespace jixia::microkernel {}
 namespace jixia::microkernel::trap {}
+namespace jixia::microkernel::console {}
 namespace jixia::platform::graph {}
 namespace jixia::hypervisor::scheduler {}
 namespace jixia::ras::diagnosis {}
@@ -154,17 +147,49 @@ Completed:
 Current queue:
 
 ```text
-ACTIVE  M00-04 Timer interrupt
+ACTIVE  F00-01 Console foundation
+PAUSED  M00-04 Timer interrupt
 NEXT    M00-05 Per-hart state and stacks
 NEXT    M00-06 Privilege transition foundation
-NEXT    M00-07 Early physical allocator
 ```
 
-M00-04 is the first asynchronous-trap milestone. It must deliberately arm the QEMU virt timer source, enable the machine timer interrupt path, recognize `mcause` as interrupt=true/code=7, service and rearm the timer before returning, preserve the saved `mepc` rather than applying synchronous-exception PC advancement, and resume through the existing common TrapFrame restore + `mret` path. This milestone remains single-hart; per-hart timer/state structures are deferred to M00-05.
+### F00-01 Console foundation
+
+Console is intentionally a standalone feature, not a subtask of the timer interrupt milestone.
+
+The active branch introduces:
+
+- `docs/JIXIA_CONSOLE_DESIGN.md`;
+- `microkernel/console/` with a freestanding sink/router/stream model;
+- a fixed 36 KiB memory ring sink;
+- a QEMU polling-UART sink;
+- normal and emergency routes;
+- `console::out << ...` without `std::iostream`;
+- a dedicated `scripts/test-console.sh` acceptance test;
+- M00-02/M00-03 regressions on the same firmware image.
+
+The timer implementation is preserved separately on `milestone/m00-04-timer-interrupt` at commit `299aff177497399236a848724b56c2e040ce4db4`. It resumes only after Console is validated and integrated, so Console and timer correctness remain independently reviewable.
 
 Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
 
-## 7. Frozen implementation scope
+## 7. Console/output architecture baseline
+
+Console follows these long-term rules:
+
+1. Formatting and transport are separate.
+2. UART is one sink, not the Console architecture.
+3. Memory history is a first-class sink.
+4. Future screen, BMC/SOL, and Jingjie outputs are separate sinks/services.
+5. `console::out` is a frontend, not the transport contract.
+6. Human-readable Console text and structured RAS/event records share infrastructure but remain different semantic layers.
+7. Raw polling output remains below Console for reset/pre-console failures.
+8. Emergency output uses only explicitly panic-safe sinks.
+9. Panic-safe paths must not depend on heap, scheduler, normal locks, or asynchronous completion.
+10. Multi-hart Console/ring ownership is deferred until per-hart state exists.
+
+Canonical design record: `docs/JIXIA_CONSOLE_DESIGN.md`.
+
+## 8. Frozen implementation scope
 
 The following remain long-term architecture topics but are not current implementation work:
 
@@ -177,13 +202,13 @@ The following remain long-term architecture topics but are not current implement
 
 They remain frozen until the Jingjie simulator prerequisites in `docs/JIXIA_SOLO_ROADMAP.md` are satisfied.
 
-## 8. New-conversation scan protocol
+## 9. New-conversation scan protocol
 
 Before answering a Jixia/Firmware project question in a new chat:
 
 1. inspect `Pedroaliu/Firmware`, its default branch, progress branch, and latest commits;
 2. read this file;
-3. read `docs/JIXIA_PROGRESS.md` to identify the single ACTIVE milestone;
+3. read `docs/JIXIA_PROGRESS.md` to identify the single ACTIVE work item;
 4. read `docs/JIXIA_SOLO_ROADMAP.md` for phase order and gates;
 5. read `README.md`;
 6. read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`;
@@ -194,7 +219,7 @@ Before answering a Jixia/Firmware project question in a new chat:
 
 Repository state wins over remembered chat state unless the user explicitly says the repository is stale.
 
-## 9. Confirmed repositories
+## 10. Confirmed repositories
 
 ### Primary
 
@@ -214,7 +239,7 @@ Repository state wins over remembered chat state unless the user explicitly says
 
 The Firmware repository is never interchangeable with similarly named simulator repositories.
 
-## 10. Decisions not to forget
+## 11. Decisions not to forget
 
 - Jixia is not another EDK II implementation or mini-KVM.
 - Native Linux/KVM remains a supported future profile and comparison baseline.
@@ -225,10 +250,11 @@ The Firmware repository is never interchangeable with similarly named simulator 
 - Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now, even though its runtime is deferred.
 - BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
 - Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
-- One active milestone at a time is a deliberate learning and quality strategy.
+- One active work item at a time is a deliberate learning and quality strategy.
+- Console and timer interrupt are independent features and must have independent branches and acceptance evidence.
 
-## 11. Maintenance
+## 12. Maintenance
 
-Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, or learning/implementation workflow change.
+Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE work item, feature gates, core sources, execution profiles, trust assumptions, Console/logging architecture, or learning/implementation workflow change.
 
-Routine test results and milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
+Routine test results and feature/milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
