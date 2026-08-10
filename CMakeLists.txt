@@ -41,6 +41,7 @@ add_executable(
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
     microkernel/core/timer.cpp
+    microkernel/core/smp_timer_test.cpp
     microkernel/core/kernel_print_test.cpp
     microkernel/core/recoverable_trap_test.cpp
     microkernel/core/timer_interrupt_test.cpp
@@ -50,6 +51,7 @@ add_executable(
         microkernel/arch/riscv/hart_layout.h
         microkernel/core/hart.h
         microkernel/core/hart.cpp
+        microkernel/core/smp_timer_test.h
         microkernel/arch/riscv/hart_layout_defs.h
         lib/fdt.h
         lib/fdt.cpp
