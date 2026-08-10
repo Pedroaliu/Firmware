@@ -3,6 +3,7 @@
 #include "microkernel/console/kernel_console.h"
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
+#include "microkernel/core/smp_timer_test.h"
 #include "lib/fdt.h"
 
 
@@ -128,11 +129,10 @@ void boot_main(
         reinterpret_cast<void*>(dtb_address),
         static_cast<unsigned>(hart::kMaxHarts),
         static_cast<unsigned>(present_count));
+
     /*
-     * Secondary harts never printk.
-     *
-     * They publish HartLocal::state with release semantics, while the boot
-     * hart observes it with acquire semantics.
+     * Secondary harts publish HartLocal::state with release semantics, while
+     * the boot hart observes each present slot with acquire semantics.
      */
     hart::wait_until_all_online(
         present_count);
@@ -146,10 +146,16 @@ void boot_main(
 
 
     /*
-     * Completed foundations remain live regressions.
-     *
-     * M00-04 currently programs hart0's mtimecmp, so the boot role remains
-     * architectural hart 0 during this milestone.
+     * Every present hart now proves that its own timer compare, trap path, and
+     * per-hart timer state work independently. Secondary harts still never
+     * write printk; only the boot hart publishes the aggregate result.
+     */
+    smp_timer_test::run_boot(
+        present_count);
+
+
+    /*
+     * Completed foundations remain live regressions after the SMP probe.
      */
     jixia_kernel_print_test();
     jixia_recoverable_trap_test();
@@ -179,11 +185,12 @@ void secondary_main(
     (void)secondary_local;
 
     /*
-     * M00-05 proves execution ownership and rendezvous only.
-     *
-     * Secondary harts do not run arbitrary firmware work yet. Scheduler/task
-     * dispatch comes later.
+     * Secondary harts participate only in the bounded M00-05 SMP timer probe,
+     * then permanently park. This is still not arbitrary work dispatch or a
+     * scheduler.
      */
+    smp_timer_test::run_secondary();
+
     hart::park();
 }
 
