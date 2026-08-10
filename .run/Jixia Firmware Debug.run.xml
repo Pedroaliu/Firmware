@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Jixia Firmware Debug" type="com.jetbrains.cidr.embedded.customgdbserver.type" factoryName="com.jetbrains.cidr.embedded.customgdbserver.factory" PROGRAM_PARAMS="-machine virt -cpu rv64 -m 128M -smp 1 -bios build/clion-debug/jixia.bin -display none -serial stdio -monitor none -S -gdb tcp:127.0.0.1:1234" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$PROJECT_DIR$" PASS_PARENT_ENVS_2="true" PROJECT_NAME="jixia_firmware" TARGET_NAME="jixia.elf" CONFIG_NAME="jixia-rv64-debug - jixia-rv64-debug" version="1" RUN_PATH="$PROJECT_DIR$/build/clion-debug/jixia.elf">
+    <custom-gdb-server version="1" gdb-connect="127.0.0.1:1234" executable="/usr/bin/qemu-system-riscv64" warmup-ms="1000" download-type="NONE" reset-cmd="" reset-type="AFTER_DOWNLOAD">
+      <debugger toolchainName="Jixia RV64" />
+    </custom-gdb-server>
+    <method v="2">
+      <option name="CLION.COMPOUND.BUILD" enabled="true" />
+    </method>
+  </configuration>
+</component>

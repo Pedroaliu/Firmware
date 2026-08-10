@@ -20,7 +20,7 @@ exec qemu-system-riscv64 \
     -machine virt \
     -cpu rv64 \
     -m 128M \
-    -smp 1 \
+    -smp 4 \
     -bios "${FIRMWARE}" \
     -display none \
     -serial stdio \

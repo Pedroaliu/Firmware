@@ -83,17 +83,15 @@ SECTIONS
         __bss_end = .;
     } > RAM :data
 
-    .stack (NOLOAD) : ALIGN(16)
-    {
-        __stack_bottom = .;
+.stack (NOLOAD) : ALIGN(16)
+{
+    __stack_bottom = .;
 
-        /*
-         * M00 currently has one boot hart.
-         */
-        . += 16K;
+    KEEP(*(.stack.harts))
+    KEEP(*(.stack.harts.*))
 
-        __stack_top = .;
-    } > RAM
+    __stack_top = .;
+} > RAM
 
     __image_end = .;
 

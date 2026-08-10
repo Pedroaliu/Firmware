@@ -47,6 +47,10 @@ add_executable(
     microkernel/core/trap_frame_test.cpp
     platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
+        microkernel/arch/riscv/hart_layout.h
+        microkernel/core/hart.h
+        microkernel/core/hart.cpp
+        microkernel/arch/riscv/hart_layout_defs.h
 )
 
 target_include_directories(
