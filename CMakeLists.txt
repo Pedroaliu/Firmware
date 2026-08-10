@@ -51,6 +51,8 @@ add_executable(
         microkernel/core/hart.h
         microkernel/core/hart.cpp
         microkernel/arch/riscv/hart_layout_defs.h
+        lib/fdt.h
+        lib/fdt.cpp
 )
 
 target_include_directories(

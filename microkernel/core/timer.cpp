@@ -1,8 +1,10 @@
 #include "microkernel/core/timer.h"
+#include "microkernel/core/hart.h"
+#include "platform/qemu_virt/timer.h"
 
 #include <stdint.h>
 
-#include "platform/qemu_virt/timer.h"
+
 
 namespace jixia::microkernel::timer {
 namespace {
@@ -10,7 +12,7 @@ namespace {
 inline constexpr uintptr_t mstatus_mie = uintptr_t{1} << 3U;
 inline constexpr uintptr_t mie_mtie = uintptr_t{1} << 7U;
 
-volatile uintptr_t machine_timer_interrupt_count = 0;
+
 
 void enable_machine_timer_interrupt()
 {
@@ -31,13 +33,15 @@ void enable_global_interrupts()
 
 void arm_once(uint64_t delta_ticks)
 {
-    /*
-     * Program the deadline before enabling delivery. If the deadline becomes
-     * pending first, the interrupt is held pending until both MTIE and MIE are
-     * enabled; this avoids exposing an uninitialized compare value.
-     */
-    const uint64_t now = jixia::platform::qemu_virt::timer::read_time();
-    jixia::platform::qemu_virt::timer::set_compare(now + delta_ticks);
+    hart::HartLocal& local =
+        hart::current();
+
+    const uint64_t now =
+        jixia::platform::qemu_virt::timer::read_time();
+
+    jixia::platform::qemu_virt::timer::set_compare(
+        local.hart_id,
+        now + delta_ticks);
 
     enable_machine_timer_interrupt();
     enable_global_interrupts();
@@ -45,16 +49,22 @@ void arm_once(uint64_t delta_ticks)
 
 void handle_interrupt()
 {
-    /*
-     * MTIP is level-sensitive to the timer compare condition. Move mtimecmp
-     * into the future (here: disarm it) and disable MTIE before returning,
-     * otherwise mret could immediately trap again on the same condition.
-     */
-    disable_machine_timer_interrupt();
-    jixia::platform::qemu_virt::timer::disarm();
+    hart::HartLocal& local =
+        hart::current();
 
-    const uintptr_t next_count = machine_timer_interrupt_count + 1U;
-    machine_timer_interrupt_count = next_count;
+
+    disable_machine_timer_interrupt();
+
+
+    jixia::platform::qemu_virt::timer::disarm(
+        local.hart_id);
+
+
+    const uintptr_t next_count =
+        local.machine_timer_interrupt_count + 1U;
+
+    local.machine_timer_interrupt_count =
+        next_count;
 }
 
 void disable_global_interrupts()
@@ -64,7 +74,7 @@ void disable_global_interrupts()
 
 uintptr_t interrupt_count()
 {
-    return machine_timer_interrupt_count;
+    return  hart::current().machine_timer_interrupt_count;
 }
 
 } // namespace jixia::microkernel::timer

@@ -3,6 +3,7 @@
 #include "microkernel/console/kernel_console.h"
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
+#include "lib/fdt.h"
 
 
 extern "C" void jixia_kernel_print_test();
@@ -15,7 +16,7 @@ namespace jixia::microkernel {
 namespace {
 
 
-void print_hart_table()
+void print_hart_table(hart::HartIndex present_count)
 {
     const hart::HartLocal* harts = hart::table();
 
@@ -26,7 +27,7 @@ void print_hart_table()
 
 
     for (hart::HartIndex index = 0;
-         index < hart::kMaxHarts;
+         index < present_count;
          ++index)
     {
         const hart::HartLocal& local = harts[index];
@@ -79,6 +80,39 @@ void boot_main(
      */
     kernel_console::set_uart_mirror(true);
 
+    const ::jixia::fdt::CpuCountResult cpu_result =
+        ::jixia::fdt::cpu_count(dtb_address);
+
+
+    if (!cpu_result.valid)
+    {
+        printk(
+            "smp         : invalid DTB\n"
+            "SMP_POPULATION_TEST: FAIL\n");
+
+        hart::park();
+    }
+
+
+    if (cpu_result.count == 0 ||
+        cpu_result.count > hart::kMaxHarts)
+    {
+        printk(
+            "smp         : unsupported CPU count %u "
+            "(capacity %u)\n"
+            "SMP_POPULATION_TEST: FAIL\n",
+            static_cast<unsigned>(
+                cpu_result.count),
+            static_cast<unsigned>(
+                hart::kMaxHarts));
+
+        hart::park();
+    }
+
+
+    const auto present_count =
+        static_cast<hart::HartIndex>(
+            cpu_result.count);
 
     printk(
         "\n"
@@ -87,23 +121,28 @@ void boot_main(
         "boot slot   : %u\n"
         "dtb         : %p\n"
         "microkernel : entered (codename: Mozi)\n"
-        "smp         : waiting for %u hart(s)\n",
+        "smp capacity: %u hart(s)\n"
+        "smp present : %u hart(s)\n",
         reinterpret_cast<void*>(hart_id),
         static_cast<unsigned>(hart_index),
         reinterpret_cast<void*>(dtb_address),
-        static_cast<unsigned>(hart::kMaxHarts));
-
-
+        static_cast<unsigned>(hart::kMaxHarts),
+        static_cast<unsigned>(present_count));
     /*
      * Secondary harts never printk.
      *
      * They publish HartLocal::state with release semantics, while the boot
      * hart observes it with acquire semantics.
      */
-    hart::wait_until_all_online();
+    hart::wait_until_all_online(
+        present_count);
 
 
-    print_hart_table();
+    print_hart_table(
+        present_count);
+
+    printk(
+        "SMP_POPULATION_TEST: PASS\n");
 
 
     /*

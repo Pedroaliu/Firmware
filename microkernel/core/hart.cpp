@@ -78,6 +78,7 @@ HartLocal& initialize(
     local.hart_id = hart_id;
     local.index = index;
     local.role = role;
+    local.machine_timer_interrupt_count = 0U;
 
 
     const uintptr_t stack_base =
@@ -133,14 +134,22 @@ const HartLocal* table()
 }
 
 
-bool all_online()
+bool all_online(HartIndex expected_count)
 {
+    if (expected_count == 0 ||
+        expected_count > kMaxHarts)
+    {
+        return false;
+    }
+
+
     const uint32_t online =
-        static_cast<uint32_t>(HartState::online);
+        static_cast<uint32_t>(
+            HartState::online);
 
 
     for (HartIndex index = 0;
-         index < kMaxHarts;
+         index < expected_count;
          ++index)
     {
         const uint32_t state =
@@ -160,16 +169,18 @@ bool all_online()
 }
 
 
-void wait_until_all_online()
+void wait_until_all_online(
+    HartIndex expected_count)
 {
-    while (!all_online())
+    if (expected_count == 0 ||
+        expected_count > kMaxHarts)
     {
-        /*
-         * Do not introduce a lock just to implement rendezvous.
-         *
-         * This is a bounded M00-05 boot barrier. Later scheduling/event
-         * primitives will replace raw spinning where appropriate.
-         */
+        halt_forever();
+    }
+
+
+    while (!all_online(expected_count))
+    {
         __asm__ volatile("nop");
     }
 }

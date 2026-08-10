@@ -45,6 +45,8 @@ struct alignas(64) HartLocal
     uintptr_t stack_bottom;
     uintptr_t stack_top;
 
+    volatile uintptr_t machine_timer_interrupt_count;
+
     HartIndex index;
     HartRole role;
 
@@ -77,10 +79,10 @@ const HartLocal* table();
 
 
 [[nodiscard]]
-bool all_online();
+bool all_online(HartIndex expected_count);
 
 
-void wait_until_all_online();
+void wait_until_all_online(HartIndex expected_count);
 
 
 [[noreturn]]
