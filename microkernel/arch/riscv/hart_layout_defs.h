@@ -1,0 +1,5 @@
+#pragma once
+
+#define HART_MAX_COUNT 4
+#define HART_BOOT_STACK_SIZE 16384
+#define HART_BOOT_STACK_ALIGNMENT 16
