@@ -283,6 +283,7 @@ PY
 
 
     for marker in \
+        "SMP_TIMER_TEST: PASS" \
         "KERNEL_PRINT_TEST: PASS" \
         "RECOVERABLE_TRAP_TEST: PASS" \
         "MACHINE_TIMER_TEST: PASS" \
