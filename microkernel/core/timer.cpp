@@ -5,13 +5,11 @@
 #include <stdint.h>
 
 
-
 namespace jixia::microkernel::timer {
 namespace {
 
 inline constexpr uintptr_t mstatus_mie = uintptr_t{1} << 3U;
 inline constexpr uintptr_t mie_mtie = uintptr_t{1} << 7U;
-
 
 
 void enable_machine_timer_interrupt()
@@ -31,6 +29,7 @@ void enable_global_interrupts()
 
 } // namespace
 
+
 void arm_once(uint64_t delta_ticks)
 {
     hart::HartLocal& local =
@@ -47,18 +46,16 @@ void arm_once(uint64_t delta_ticks)
     enable_global_interrupts();
 }
 
+
 void handle_interrupt()
 {
     hart::HartLocal& local =
         hart::current();
 
-
     disable_machine_timer_interrupt();
-
 
     jixia::platform::qemu_virt::timer::disarm(
         local.hart_id);
-
 
     const uintptr_t next_count =
         local.machine_timer_interrupt_count + 1U;
@@ -67,14 +64,17 @@ void handle_interrupt()
         next_count;
 }
 
+
 void disable_global_interrupts()
 {
     __asm__ volatile("csrc mstatus, %0" :: "r"(mstatus_mie) : "memory");
 }
 
+
 uintptr_t interrupt_count()
 {
-    return  hart::current().machine_timer_interrupt_count;
+    return hart::current().machine_timer_interrupt_count;
 }
+
 
 } // namespace jixia::microkernel::timer
