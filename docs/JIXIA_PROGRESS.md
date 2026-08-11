@@ -2,12 +2,13 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-07
+- **Last updated:** 2026-08-11
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
 - **Current progress branch:** `milestone/m00-05-smp-foundation`
 - **Current milestone:** `M00-05 Per-hart state, stacks, and SMP foundation`
-- **Current status:** ACTIVE — validate the integrated single-hart baseline, then begin multi-hart bring-up
+- **Current status:** DONE — accepted on the development workstation; ready for integration into `main`
+- **Next milestone:** `M00-06 Privilege transition foundation`
 
 ## Status legend
 
@@ -28,20 +29,24 @@
 | M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, `mtval` fatal path |
 | M00-02 Complete RV64 TrapFrame | DONE | `bash scripts/test-trap-frame.sh`; `TRAP_FRAME_TEST: PASS` | complete integer context, shared assembly/C++ ABI, common save/restore path |
 | M00-03 Recoverable trap and `mret` | DONE | `bash scripts/test-recoverable-trap.sh`; `RECOVERABLE_TRAP_TEST: PASS` | 32-bit `EBREAK` and 16-bit `C.EBREAK` resume through common restore + `mret` |
-| M00-04 Machine timer interrupt | DONE | branch `milestone/m00-04-timer-interrupt`; PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt; saved `mepc` is not artificially advanced |
-| F00-01 Kernel print foundation | DONE | branch `feature/console-foundation`; `scripts/test-kernel-print.sh`; user-confirmed QEMU acceptance on 2026-08-07 | shared formatter, 36 KiB append-only kernel log, temporary UART mirror, `printk` |
-| Console/timer integration | DONE | PR #8; squash commit `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | rebuilt from `main` so timer and console foundations coexist without branch-regression |
-| M00-05 Per-hart state, stacks, SMP foundation | ACTIVE | pending | next code milestone |
-| M00-06 Privilege transition foundation | NEXT | pending | firmware-first privilege model |
+| M00-04 Machine timer interrupt | DONE | PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt |
+| F00-01 Kernel print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, append-only KernelLogBuffer, temporary UART mirror, `printk` |
+| Console/timer integration | DONE | PR #8; `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | timer and console foundations coexist without regression |
+| M00-05 Per-hart state, stacks, SMP foundation | DONE | `bash scripts/test-m00-05-population.sh`; user-confirmed 2026-08-11; `docs/JIXIA_M00_05_SMP_FOUNDATION.md` | private stacks, HartLocal/mscratch, explicit publication, FDT population, per-hart timers, 1/2/4-hart acceptance, controlled 5-hart rejection |
+| M00-06 Privilege transition foundation | NEXT | pending | first M->S->M controlled transition; trusted trap-stack boundary |
 | M00-07 Early physical allocator | PLANNED | pending | supports later service/memory work |
 | M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
-| M00-09 Automated QEMU test harness | PLANNED | pending | consolidate machine-checkable regression tests |
+| M00-09 Automated QEMU test harness | PLANNED | `scripts/jixia.sh`; milestone scripts remain authoritative | consolidate machine-checkable regression tests later |
 
-## Accepted foundation
+---
+
+## Accepted foundation through M00-04/F00-01
 
 ### M00-02 — TrapFrame
 
-The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout. Recorded result:
+The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout.
+
+Recorded result:
 
 ```text
 TRAP_FRAME_TEST: PASS
@@ -51,116 +56,173 @@ Design record: `docs/JIXIA_M00_02_TRAP_FRAME.md`.
 
 ### M00-03 — recoverable synchronous traps
 
-Recovery is whitelist-based. The handler verifies `EBREAK` or `C.EBREAK` at saved `mepc`, advances by the decoded 4/2-byte length, and returns through the common restore + `mret` path.
+Recovery is whitelist-based. The handler verifies `EBREAK` or `C.EBREAK`, advances saved `mepc` by the decoded instruction length, and returns through the common restore + `mret` path.
 
-Recorded markers:
+Recorded result:
 
 ```text
-standard   : resumed after 32-bit EBREAK
-compressed : resumed after 16-bit C.EBREAK
 RECOVERABLE_TRAP_TEST: PASS
 TRAP_FRAME_TEST: PASS
 ```
 
 ### M00-04 — machine timer interrupt
 
-The timer path introduced the first asynchronous recoverable trap:
-
-```text
-mcause.interrupt = 1
-mcause.code      = 7
-```
-
-Key invariant: asynchronous timer handling does **not** advance saved `mepc`. The timer condition is serviced/rearmed before return through the same TrapFrame restore path.
-
-Integrated source/test artifacts:
-
-```text
-microkernel/core/timer.{h,cpp}
-microkernel/core/timer_interrupt_test.cpp
-platform/qemu_virt/timer.{h,cpp}
-scripts/test-timer-interrupt.sh
-```
+The timer path introduced the first asynchronous recoverable trap. Its core invariant is that asynchronous timer handling does **not** artificially advance saved `mepc`.
 
 ### F00-01 — Kernel Print
 
-Accepted dependency split:
+Accepted minimum diagnostic path:
 
 ```text
 printk
    |
 shared freestanding formatter
    |
-36 KiB append-only KernelLogBuffer
+KernelLogBuffer
    |
    `---- temporary raw-UART mirror
 ```
 
-The future runtime Console Service remains separate from this minimum kernel diagnostic path. See `docs/JIXIA_CONSOLE_DESIGN.md`.
+The future runtime Console Service remains a separate failure/runtime domain.
 
-The integrated firmware executes the live regressions in this order:
+---
+
+## DONE — M00-05 Per-hart state, stacks, and SMP foundation
+
+### Objective achieved
+
+Mozi now has a correct small-SMP foundation that separates architectural hart identity from dense software runtime state and does not infer physical topology from hart-number arithmetic.
+
+### Accepted mechanisms
 
 ```text
-Kernel Print
-  -> Recoverable Trap
-  -> Machine Timer
-  -> TrapFrame (parks hart)
+[x] define maximum capacity without treating it as actual population
+[x] define dense HartIndex separately from architectural HartId
+[x] provide a private per-hart stack before C/C++ entry
+[x] make exactly one boot hart perform BSS/global initialization
+[x] keep pre-BSS synchronization variables outside .bss
+[x] use atomic slot allocation for uniqueness
+[x] use explicit release/acquire ordering for publication
+[x] add HartLocal and bind it through per-hart mscratch
+[x] preserve a single-writer printk policy during M00-05
+[x] discover actual CPU population from a bounded FDT parser
+[x] reject invalid/zero/over-capacity population without waiting forever
+[x] move timer compare/state to per-hart ownership
+[x] prove every present hart can take its own timer interrupt
+[x] retain M00-02/M00-03/M00-04/F00-01 regressions
+[x] add machine-checkable 1/2/4-hart and over-capacity acceptance
+[x] record concurrency and SMP design invariants
 ```
 
-The two integrated acceptance scripts cross-check the foundation markers:
+### Core invariants
+
+- a hart never enters normal C/C++ on another hart's stack;
+- secondaries do not touch normal BSS/global state before the boot hart publishes completion;
+- slot-allocation atomicity and memory-publication ordering are treated as different problems;
+- `HartId` is architectural identity, while `HartIndex` is a dense software slot;
+- physical socket/core/cluster/NUMA topology belongs to PlatformGraph;
+- per-hart ownership is preferred over shared mutable state and locks;
+- `volatile` is not treated as cross-hart synchronization;
+- only the boot hart is a normal `printk` writer in this milestone;
+- `mscratch -> HartLocal` becomes the per-hart kernel-state anchor for later privilege work.
+
+### Acceptance evidence
+
+Primary command:
+
+```bash
+bash scripts/test-m00-05-population.sh
+```
+
+User-confirmed on 2026-08-11.
+
+Supported matrix:
 
 ```text
+-smp 1: PASS
+-smp 2: PASS
+-smp 4: PASS
+```
+
+Controlled over-capacity case:
+
+```text
+-smp 5
+unsupported CPU count 5 (capacity 4)
+SMP_POPULATION_TEST: FAIL
+CONTROLLED_OVER_CAPACITY: PASS
+```
+
+Supported cases preserve:
+
+```text
+SMP_FOUNDATION_TEST: PASS
+SMP_POPULATION_TEST: PASS
+SMP_TIMER_TEST: PASS
 KERNEL_PRINT_TEST: PASS
 RECOVERABLE_TRAP_TEST: PASS
 MACHINE_TIMER_TEST: PASS
 TRAP_FRAME_TEST: PASS
 ```
 
-## NOW — M00-05 Per-hart state, stacks, and SMP foundation
+Design record:
 
-### Objective
+- `docs/JIXIA_M00_05_SMP_FOUNDATION.md`
+- `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`
 
-Move Mozi from a single boot hart to a correct multi-hart foundation without hard-coding socket topology into the microkernel.
+### Known limitations
 
-### First gate: integrated baseline
+M00-05 intentionally does not add:
 
-Before changing SMP state, run from `main` or the new M00-05 branch:
+- scheduler or arbitrary secondary-hart work dispatch;
+- user/supervisor execution;
+- lower-privilege trap-stack switching;
+- concurrent multi-writer `printk`;
+- physical socket/core/NUMA topology;
+- dynamic hart hotplug;
+- a general PlatformGraph/FDT implementation;
+- structured Event/Trace ABI.
 
-```bash
-bash scripts/test-kernel-print.sh
-bash scripts/test-timer-interrupt.sh
-```
+The host ThreadSanitizer experiment is deferred because the current Deepin GCC TSan runtime fails before the model executes with an unexpected-memory-mapping error; the available Clang setup lacks the required C++ standard-library configuration. This is recorded as a host-tooling limitation, not a target-runtime correctness failure.
 
-Both scripts must observe the integrated foundation without a fatal trap. This is a post-integration regression gate; it does not reopen the already accepted component designs.
+Structured trace/event evidence is not yet applicable because the shared event ABI is explicitly scheduled for M00-08. M00-05 uses machine-checkable serial markers plus the acceptance harness.
 
-### Work breakdown
+---
+
+## NEXT — M00-06 Privilege transition foundation
+
+M00-06 starts only after M00-05 is integrated into `main` and the new milestone branch is created from that stable checkpoint.
+
+The first experiment should isolate privilege mechanics from virtual-memory complexity:
 
 ```text
-[ ] define maximum/boot-time hart representation without assuming socket numbering
-[ ] define per-hart boot/trap stack ownership and alignment
-[ ] make secondary harts use private stacks before entering C++
-[ ] make exactly one boot hart perform global BSS/global initialization
-[ ] define boot-hart -> secondary-hart release/rendezvous protocol
-[ ] state RISC-V/C++ memory-order and fence requirements for release/observe
-[ ] add HartLocal/per-hart runtime state
-[ ] bring up multiple QEMU harts and prove unique per-hart state
-[ ] define printk policy before allowing concurrent writers
-[ ] retain M00-02/M00-03/M00-04/F00-01 regressions
-[ ] separate hart identity from PlatformGraph socket/core/NUMA topology
-[ ] add machine-checkable SMP acceptance evidence
+M-mode Mozi
+    -> configure mstatus.MPP = S
+    -> configure mepc
+    -> mret
+    -> S-mode payload with satp = 0
+    -> ecall / controlled exception
+    -> M-mode trap
+    -> inspect previous privilege and saved state
+    -> controlled return
 ```
 
-### Initial invariants
+The key new security/correctness problem is trap-stack trust. Once lower-privilege code controls its own `sp`, M-mode trap entry must not blindly use that stack as trusted kernel storage.
 
-- a hart must never execute C/C++ on another hart's stack;
-- secondary harts must not race the boot hart's BSS/global initialization;
-- publication of global initialization completion must have an explicit memory-order contract;
-- hart ID is an architectural identifier, not a formula for socket/core/NUMA identity;
-- physical topology belongs to PlatformGraph;
-- avoid global shared mutable state where per-hart ownership is sufficient;
-- do not add an ad-hoc spinlock simply to make `printk` appear SMP-safe; establish the required ownership/synchronization contract first.
+M00-06 will build on:
 
-Concurrency rules: `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`.
+```text
+complete TrapFrame
+recoverable mret path
+private per-hart stack
+HartLocal
+mscratch -> HartLocal
+per-hart mtvec
+```
+
+and define the trusted per-hart trap/kernel stack transition.
+
+---
 
 ## NEXT queue
 
@@ -169,6 +231,8 @@ Concurrency rules: `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`.
 3. `M00-08 Structured event and trace ABI`
 
 Only one architectural milestone is ACTIVE at a time.
+
+---
 
 ## Frozen implementation areas
 
@@ -184,6 +248,8 @@ FROZEN  simulator-dependent partition hardware experiments
 
 They are released only through the gates in `docs/JIXIA_SOLO_ROADMAP.md`.
 
+---
+
 ## Branch/integration rule
 
 Completed milestones and accepted foundational features are merged into `main` promptly. New major work starts from the latest integrated baseline.
@@ -191,43 +257,35 @@ Completed milestones and accepted foundational features are merged into `main` p
 ```text
 main
   |
-  +-- milestone/feature branch
+  +-- milestone branch
           |
           +-- implementation
           +-- test evidence
           +-- design record
           |
-          `-- merge back to main
+          `-- merge/fast-forward back to main
 ```
 
 Do not build a long chain of completed milestone branches while leaving `main` stale.
 
+---
+
 ## Progress history
+
+### 2026-08-11 — M00-05 accepted
+
+- User confirmed the complete population/SMP timer regression matrix passed on the development workstation.
+- Supported QEMU populations: 1, 2, and 4 harts.
+- Five harts exceed current capacity and are rejected through the controlled failure path.
+- M00-05 design/invariant record added as `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
+- Host TSan remains deferred tooling work and does not block milestone acceptance.
+- M00-06 is the next architectural milestone after integration.
 
 ### 2026-08-07 — repository baseline consolidated
 
-- M00-02, M00-03, and M00-04 integrated through PR #6; merge commit `d33111c2beb1e360bb057747f8b1c7dda34dc773`.
-- The original direct Console PR #7 was closed because `feature/console-foundation` had diverged before M00-04 and would have regressed timer work.
-- A conflict-resolved integration was rebuilt from `main` and merged through PR #8; squash commit `043d7c71eba8ed067ccda5421a11e408f69bd1a0`.
-- CMake, firmware entry, trap dispatch, diagnostics, linker rules, and regression scripts now preserve both timer and console foundations.
-- The next architectural milestone is M00-05 SMP/per-hart foundation.
-
-### 2026-08-07 — F00-01 Kernel Print accepted
-
-- Status: DONE
-- Original branch: `feature/console-foundation`
-- Acceptance: user confirmed the kernel-print QEMU test passed on the development workstation.
-- Design decisions: kernel log is authoritative; UART is a bring-up mirror; future service console is a separate failure/runtime domain.
-
-### 2026-08-07 — M00-03 Recoverable trap completed
-
-- Test: `bash scripts/test-recoverable-trap.sh`
-- Result: standard and compressed breakpoints resumed, `RECOVERABLE_TRAP_TEST: PASS`, `TRAP_FRAME_TEST: PASS`.
-
-### 2026-08-07 — M00-02 TrapFrame completed
-
-- Test: `bash scripts/test-trap-frame.sh`
-- Result: `TRAP_FRAME_TEST: PASS`.
+- M00-02, M00-03, and M00-04 integrated through PR #6.
+- Console/timer conflict-resolved integration merged through PR #8.
+- CMake, firmware entry, trap dispatch, diagnostics, linker rules, and regression scripts preserve both timer and console foundations.
 
 ### 2026-08-05 — project execution process established
 
