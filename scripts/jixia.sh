@@ -244,9 +244,17 @@ run_qemu()
     base_qemu_args args
 
     if [[ ${CONSOLE} -eq 1 ]]; then
-        args+=(-serial stdio)
+        # Let QEMU own both the interactive stdio backend and UART logging.
+        # Piping -serial stdio through tee is unreliable because the stdio
+        # chardev is terminal-oriented rather than a plain stdout byte stream.
+        args+=(
+            -chardev "stdio,id=jixia_serial,signal=on,logfile=${serial_log}"
+            -serial "chardev:jixia_serial"
+        )
     else
-        args+=(-serial "file:${serial_log}")
+        args+=(
+            -serial "file:${serial_log}"
+        )
     fi
 
     args+=("${QEMU_EXTRA[@]}")
@@ -263,28 +271,15 @@ run_qemu()
 
     set +e
 
-    if [[ ${CONSOLE} -eq 1 ]]; then
-        if [[ "${TIMEOUT_SECONDS}" == "0" ]]; then
-            "${QEMU}" "${args[@]}" \
-                2> >(tee "${qemu_log}" >&2) \
-                | tee "${serial_log}"
-            status=${PIPESTATUS[0]}
-        else
-            timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
-                "${QEMU}" "${args[@]}" \
-                2> >(tee "${qemu_log}" >&2) \
-                | tee "${serial_log}"
-            status=${PIPESTATUS[0]}
-        fi
+    if [[ "${TIMEOUT_SECONDS}" == "0" ]]; then
+        "${QEMU}" "${args[@]}" \
+            2> >(tee "${qemu_log}" >&2)
+        status=$?
     else
-        if [[ "${TIMEOUT_SECONDS}" == "0" ]]; then
-            "${QEMU}" "${args[@]}" >"${qemu_log}" 2>&1
-            status=$?
-        else
-            timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
-                "${QEMU}" "${args[@]}" >"${qemu_log}" 2>&1
-            status=$?
-        fi
+        timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
+            "${QEMU}" "${args[@]}" \
+            2> >(tee "${qemu_log}" >&2)
+        status=$?
     fi
 
     set -e
