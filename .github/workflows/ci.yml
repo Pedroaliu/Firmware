@@ -1,0 +1,83 @@
+name: Jixia CI
+
+on:
+  push:
+    branches:
+      - main
+      - "milestone/**"
+      - "feature/**"
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jixia-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rv64-qemu-regression:
+    name: RV64 QEMU regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      JIXIA_QEMU_TIMEOUT_SECONDS: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare development environment
+        run: |
+          bash scripts/setup-dev-env.sh --yes --without-gdb
+
+      - name: Show resolved toolchain
+        run: |
+          bash scripts/jixia.sh env
+
+      - name: Configure and build
+        run: |
+          bash scripts/jixia.sh build --reconfigure
+
+      - name: TrapFrame regression
+        run: |
+          bash scripts/test-trap-frame.sh
+
+      - name: Recoverable trap regression
+        run: |
+          bash scripts/test-recoverable-trap.sh
+
+      - name: Machine timer regression
+        run: |
+          bash scripts/test-timer-interrupt.sh
+
+      - name: Kernel print regression
+        run: |
+          bash scripts/test-kernel-print.sh
+
+      - name: SMP population regression
+        run: |
+          bash scripts/test-m00-05-population.sh
+
+      - name: Upload firmware and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jixia-ci-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            build/clion-debug/jixia.elf
+            build/clion-debug/jixia.bin
+            build/clion-debug/jixia.map
+            build/clion-debug/jixia.dis
+            build/clion-debug/jixia.readelf
+            build/clion-debug/*.log
+            build/clion-debug/logs/

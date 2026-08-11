@@ -85,6 +85,15 @@ __hart_stacks_end:
      csrw mie, zero
 
      /*
+      * Explicitly mark the per-hart HartLocal anchor as not installed.
+      *
+      * hart::initialize() later publishes HartLocal* into mscratch. The
+      * privilege-aware trap entry treats zero as the early-M bootstrap state
+      * and never relies on an implementation-specific reset value.
+      */
+     csrw mscratch, zero
+
+     /*
       * Every hart needs a valid gp before entering C/C++.
       *
       * Prevent relaxation because gp itself is not valid yet.

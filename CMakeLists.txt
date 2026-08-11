@@ -24,6 +24,61 @@ set(JIXIA_LINKER_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
 )
 
+# CMAKE_OBJCOPY/CMAKE_OBJDUMP/CMAKE_READELF are FILEPATH cache variables.
+# Passing a bare command name such as "riscv64-unknown-elf-objcopy" on the
+# CMake command line may therefore be normalized into a non-existent path
+# relative to the source tree. That happened on the first GitHub Actions run:
+# the compiler linked jixia.elf successfully, but the POST_BUILD objcopy step
+# tried to execute <repo>/riscv64-unknown-elf-objcopy instead of /usr/bin/....
+#
+# Resolve the tools explicitly. Existing absolute tool paths are preserved;
+# otherwise search PATH, which keeps local development and clean CI runners
+# using the same contract.
+function(jixia_resolve_binutil out_var cmake_candidate fallback_name)
+    if(cmake_candidate AND
+       IS_ABSOLUTE "${cmake_candidate}" AND
+       EXISTS "${cmake_candidate}")
+        set(${out_var} "${cmake_candidate}" PARENT_SCOPE)
+        return()
+    endif()
+
+    if(cmake_candidate)
+        get_filename_component(candidate_name "${cmake_candidate}" NAME)
+    else()
+        set(candidate_name "${fallback_name}")
+    endif()
+
+    set(resolved_var "${out_var}_RESOLVED")
+
+    find_program(
+        ${resolved_var}
+        NAMES
+            "${candidate_name}"
+            "${fallback_name}"
+        REQUIRED
+    )
+
+    set(${out_var} "${${resolved_var}}" PARENT_SCOPE)
+endfunction()
+
+jixia_resolve_binutil(
+    JIXIA_OBJCOPY
+    "${CMAKE_OBJCOPY}"
+    riscv64-unknown-elf-objcopy
+)
+
+jixia_resolve_binutil(
+    JIXIA_OBJDUMP
+    "${CMAKE_OBJDUMP}"
+    riscv64-unknown-elf-objdump
+)
+
+jixia_resolve_binutil(
+    JIXIA_READELF
+    "${CMAKE_READELF}"
+    riscv64-unknown-elf-readelf
+)
+
 add_executable(
     jixia.elf
 
@@ -48,13 +103,13 @@ add_executable(
     microkernel/core/trap_frame_test.cpp
     platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
-        microkernel/arch/riscv/hart_layout.h
-        microkernel/core/hart.h
-        microkernel/core/hart.cpp
-        microkernel/core/smp_timer_test.h
-        microkernel/arch/riscv/hart_layout_defs.h
-        lib/fdt.h
-        lib/fdt.cpp
+    microkernel/arch/riscv/hart_layout.h
+    microkernel/core/hart.h
+    microkernel/core/hart.cpp
+    microkernel/core/smp_timer_test.h
+    microkernel/arch/riscv/hart_layout_defs.h
+    lib/fdt.h
+    lib/fdt.cpp
 )
 
 target_include_directories(
@@ -116,13 +171,13 @@ add_custom_command(
     POST_BUILD
 
     COMMAND
-        ${CMAKE_OBJCOPY}
+        ${JIXIA_OBJCOPY}
         -O binary
         $<TARGET_FILE:jixia.elf>
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.bin
 
     COMMAND
-        ${CMAKE_OBJDUMP}
+        ${JIXIA_OBJDUMP}
         -d
         -S
         $<TARGET_FILE:jixia.elf>
@@ -130,7 +185,7 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.dis
 
     COMMAND
-        ${CMAKE_READELF}
+        ${JIXIA_READELF}
         -a
         $<TARGET_FILE:jixia.elf>
         >

@@ -5,9 +5,11 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "microkernel/arch/riscv/hart_layout.h"
+#include "microkernel/arch/riscv/hart_local_abi.h"
 
 
 namespace jixia::microkernel::hart {
@@ -60,7 +62,58 @@ struct alignas(64) HartLocal
     uint32_t state;
 
     uint32_t reserved;
+
+    /*
+     * Transient M-mode trap-entry scratch.
+     *
+     * A trap arriving from lower privilege cannot trust the interrupted sp.
+     * trap.S first uses mscratch to reach this HartLocal, then temporarily
+     * parks the lower-privilege sp and t1 here while switching to trusted
+     * per-hart machine-mode stack storage.
+     *
+     * These fields are non-nestable scratch, not persistent runtime state.
+     */
+    uintptr_t trap_entry_sp;
+    uintptr_t trap_entry_t1;
 };
+
+
+/*
+ * trap.S accesses selected HartLocal fields by constant byte offset.
+ * Keep the assembly/C++ ABI machine-checked just like TrapFrame.
+ */
+static_assert(
+    offsetof(HartLocal, hart_id) ==
+    HART_LOCAL_HART_ID_OFFSET);
+static_assert(
+    offsetof(HartLocal, stack_bottom) ==
+    HART_LOCAL_STACK_BOTTOM_OFFSET);
+static_assert(
+    offsetof(HartLocal, stack_top) ==
+    HART_LOCAL_STACK_TOP_OFFSET);
+static_assert(
+    offsetof(HartLocal, machine_timer_interrupt_count) ==
+    HART_LOCAL_TIMER_COUNT_OFFSET);
+static_assert(
+    offsetof(HartLocal, index) ==
+    HART_LOCAL_INDEX_OFFSET);
+static_assert(
+    offsetof(HartLocal, role) ==
+    HART_LOCAL_ROLE_OFFSET);
+static_assert(
+    offsetof(HartLocal, state) ==
+    HART_LOCAL_STATE_OFFSET);
+static_assert(
+    offsetof(HartLocal, reserved) ==
+    HART_LOCAL_RESERVED_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_entry_sp) ==
+    HART_LOCAL_TRAP_ENTRY_SP_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_entry_t1) ==
+    HART_LOCAL_TRAP_ENTRY_T1_OFFSET);
+static_assert(sizeof(HartLocal) == HART_LOCAL_SIZE);
+static_assert(alignof(HartLocal) == 64U);
 
 
 [[nodiscard]]
