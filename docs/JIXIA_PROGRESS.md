@@ -5,10 +5,10 @@
 - **Last updated:** 2026-08-11
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-05-smp-foundation`
-- **Current milestone:** `M00-05 Per-hart state, stacks, and SMP foundation`
-- **Current status:** DONE — accepted on the development workstation; ready for integration into `main`
-- **Next milestone:** `M00-06 Privilege transition foundation`
+- **Current progress branch:** `milestone/m00-06-privilege-transition`
+- **Current milestone:** `M00-06 Privilege transition foundation`
+- **Current status:** ACTIVE — define and prove the first controlled M->S->M transition and trusted trap-stack boundary
+- **Previous milestone:** `M00-05 Per-hart state, stacks, and SMP foundation` — DONE and integrated into `main`
 
 ## Status legend
 
@@ -33,8 +33,8 @@
 | F00-01 Kernel print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, append-only KernelLogBuffer, temporary UART mirror, `printk` |
 | Console/timer integration | DONE | PR #8; `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | timer and console foundations coexist without regression |
 | M00-05 Per-hart state, stacks, SMP foundation | DONE | `bash scripts/test-m00-05-population.sh`; user-confirmed 2026-08-11; `docs/JIXIA_M00_05_SMP_FOUNDATION.md` | private stacks, HartLocal/mscratch, explicit publication, FDT population, per-hart timers, 1/2/4-hart acceptance, controlled 5-hart rejection |
-| M00-06 Privilege transition foundation | NEXT | pending | first M->S->M controlled transition; trusted trap-stack boundary |
-| M00-07 Early physical allocator | PLANNED | pending | supports later service/memory work |
+| M00-06 Privilege transition foundation | ACTIVE | branch `milestone/m00-06-privilege-transition` | first M->S->M controlled transition; trusted trap-stack boundary |
+| M00-07 Early physical allocator | NEXT | pending | supports later service/memory work |
 | M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
 | M00-09 Automated QEMU test harness | PLANNED | `scripts/jixia.sh`; milestone scripts remain authoritative | consolidate machine-checkable regression tests later |
 
@@ -189,11 +189,13 @@ Structured trace/event evidence is not yet applicable because the shared event A
 
 ---
 
-## NEXT — M00-06 Privilege transition foundation
+## NOW — M00-06 Privilege transition foundation
 
-M00-06 starts only after M00-05 is integrated into `main` and the new milestone branch is created from that stable checkpoint.
+### Objective
 
-The first experiment should isolate privilege mechanics from virtual-memory complexity:
+Prove a small, controlled privilege transition before introducing paging, allocator, scheduler, or service isolation.
+
+Initial state machine:
 
 ```text
 M-mode Mozi
@@ -203,32 +205,55 @@ M-mode Mozi
     -> S-mode payload with satp = 0
     -> ecall / controlled exception
     -> M-mode trap
-    -> inspect previous privilege and saved state
-    -> controlled return
+    -> prove previous privilege and saved state
+    -> controlled return or termination
 ```
 
-The key new security/correctness problem is trap-stack trust. Once lower-privilege code controls its own `sp`, M-mode trap entry must not blindly use that stack as trusted kernel storage.
+### Core problem: trusted trap-stack entry
 
-M00-06 will build on:
+M00-05 made `mscratch -> HartLocal` available on every participating hart. M00-06 now uses that per-hart anchor to solve the first real privilege-boundary problem:
+
+> Once S-mode owns its own `sp`, M-mode trap entry must not blindly treat that lower-privilege stack as trusted kernel storage.
+
+The trap path must preserve the interrupted S-mode stack pointer while switching to trusted per-hart kernel/trap state before constructing the M-mode TrapFrame.
+
+### First work breakdown
 
 ```text
-complete TrapFrame
-recoverable mret path
-private per-hart stack
-HartLocal
-mscratch -> HartLocal
-per-hart mtvec
+[ ] review mstatus.MPP, mepc, mret, mcause, mtval, mscratch, and ecall semantics
+[ ] define exact M->S->M state transitions and failure paths
+[ ] keep satp = 0 for the first experiment
+[ ] define trusted stack ownership on lower-privilege trap entry
+[ ] decide minimal HartLocal additions for trap/kernel stack state
+[ ] adapt trap entry without regressing current M-mode traps
+[ ] add a minimal S-mode payload
+[ ] trap from S-mode to M-mode and prove previous privilege
+[ ] preserve interrupted register state including lower-privilege sp
+[ ] define return/termination behavior
+[ ] add machine-checkable M00-06 acceptance markers
+[ ] retain M00-02 through M00-05 and Kernel Print regressions
+[ ] record delegation, PMP, paging, nested-trap, and security limitations
 ```
 
-and define the trusted per-hart trap/kernel stack transition.
+### Explicit non-goals for the first M00-06 proof
+
+```text
+Sv39/page tables
+physical allocator
+scheduler/tasks
+U-mode applications
+PMP service isolation
+ArchHV / HS / VS
+full syscall ABI
+```
 
 ---
 
 ## NEXT queue
 
-1. `M00-06 Privilege transition foundation`
-2. `M00-07 Early physical allocator`
-3. `M00-08 Structured event and trace ABI`
+1. `M00-07 Early physical allocator`
+2. `M00-08 Structured event and trace ABI`
+3. `M00-09 Automated QEMU test harness`
 
 Only one architectural milestone is ACTIVE at a time.
 
@@ -272,14 +297,20 @@ Do not build a long chain of completed milestone branches while leaving `main` s
 
 ## Progress history
 
-### 2026-08-11 — M00-05 accepted
+### 2026-08-11 — M00-06 activated
+
+- M00-05 closure records were integrated into `main`.
+- New branch: `milestone/m00-06-privilege-transition`.
+- The initial M00-06 experiment is constrained to M->S->M with `satp = 0`.
+- Trusted per-hart trap-stack entry is the primary correctness/security problem.
+
+### 2026-08-11 — M00-05 accepted and integrated
 
 - User confirmed the complete population/SMP timer regression matrix passed on the development workstation.
 - Supported QEMU populations: 1, 2, and 4 harts.
 - Five harts exceed current capacity and are rejected through the controlled failure path.
 - M00-05 design/invariant record added as `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
 - Host TSan remains deferred tooling work and does not block milestone acceptance.
-- M00-06 is the next architectural milestone after integration.
 
 ### 2026-08-07 — repository baseline consolidated
 
