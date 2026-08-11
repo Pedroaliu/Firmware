@@ -9,7 +9,7 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-05-smp-foundation`
+- **Current progress branch:** `milestone/m00-06-privilege-transition`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -32,39 +32,20 @@ FROZEN   work blocked by architectural prerequisites
 
 The canonical execution plan is `docs/JIXIA_SOLO_ROADMAP.md`. The canonical live status is `docs/JIXIA_PROGRESS.md`.
 
-When a milestone is completed, the progress ledger records:
-
-- commit or pull request;
-- test command and result;
-- what was learned;
-- design decisions;
-- known limitations;
-- documentation changes;
-- the next ACTIVE milestone.
-
-A milestone is not complete merely because code exists.
+Completed milestones merge promptly into `main`; new milestone branches start from the latest integrated checkpoint.
 
 ### Learning/implementation workflow
-
-The current teaching workflow deliberately separates syntax fluency from systems reasoning:
 
 - ChatGPT may provide and commit complete reference implementations for syntax-heavy or repetitive scaffolding.
 - The developer is expected to understand architectural state transitions, invariants, failure modes, and debugging evidence.
 - New mechanisms are taught through complete reference code first, then explanation, guided modification, and progressively larger independent implementation tasks.
-- Debugging should prefer observable evidence such as GDB, CSR/register state, disassembly, QEMU logs, and tests over guessing.
-- Do not turn every syntax detail into a blocking exercise.
-
-### Branch/integration rule
-
-Completed milestones and accepted foundational features are merged into `main` promptly. New major work starts from the latest integrated baseline.
-
-Do not build a long chain of completed milestone branches while leaving `main` stale.
+- Debugging should prefer GDB, CSR/register state, disassembly, QEMU logs, and machine-checkable tests over guessing.
 
 ## 3. Naming policy
 
 Jixia is the project and product brand.
 
-Chinese cultural names are implementation codenames, not source-code vocabulary. They may appear in architecture diagrams, releases, presentations, banners, and module descriptions. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
+Chinese cultural names are implementation codenames, not source-code vocabulary. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
 
 | Codename | Technical responsibility | Semantic code location / namespace |
 |---|---|---|
@@ -85,25 +66,6 @@ Chinese cultural names are implementation codenames, not source-code vocabulary.
 
 For confidential computing, keep the technical name **Confidential LPAR** until a stable codename is deliberately chosen.
 
-### Language and ABI rule
-
-- Minimum reset/assembly boundaries remain C-compatible.
-- Cross-language symbols use stable `jixia_` C ABI names.
-- Freestanding implementation code uses C++ nested namespaces.
-- Local assembly macros and internal layout constants use concise semantic names without redundant project branding.
-- Do not encode codenames into public symbols, file paths, data schemas, or protocols.
-
-Examples:
-
-```cpp
-namespace jixia::microkernel {}
-namespace jixia::microkernel::trap {}
-namespace jixia::platform::graph {}
-namespace jixia::hypervisor::scheduler {}
-namespace jixia::ras::diagnosis {}
-namespace jixia::debug::replay {}
-```
-
 ## 4. Architectural baseline
 
 Jixia retains three long-term execution profiles:
@@ -119,8 +81,6 @@ MULTI_LPAR
   Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
-A single LPAR is not automatically equivalent to native Linux/KVM. Linux must run in HS-mode to own the RISC-V H extension and act as an ordinary KVM host. A Linux partition under ArchHV runs in VS-mode unless nested virtualization is implemented.
-
 Core principles:
 
 1. Platform model first.
@@ -130,16 +90,15 @@ Core principles:
 5. Linux endpoint drivers live in a driver service domain.
 6. UEFI/ACPI/DT/U-Boot personalities are projections of one filtered PlatformGraph.
 7. Resource ownership has one authoritative manager.
-8. Partition identity eventually spans translation, interrupts, IOMMU, counters, trace, energy, and RAS.
-9. Debug/replay and fault injection are first-class architecture features.
-10. Protection, detection, and recovery are designed separately.
-11. Normal, measured, and confidential LPARs share one lifecycle model with different trust assumptions.
+8. Debug/replay and fault injection are first-class architecture features.
+9. Protection, detection, and recovery are designed separately.
+10. Firmware and the full-system simulator are co-designed.
 
 ## 5. CECSIM-style co-design rule
 
-Jixia firmware and the full-system simulator are co-designed.
+Jixia firmware and Jingjie are co-designed.
 
-The simulator is an executable architecture specification and firmware-verification platform covering CPU/SoC execution, firmware state machines, LPARs, I/O, management interactions, topology mismatches, semantic fault injection, trace, checkpoint/replay, coverage, and invariant checking across functional, timing, cycle, and RTL modes.
+The simulator is an executable architecture specification and firmware-verification platform covering CPU/SoC execution, firmware state machines, LPARs, I/O, management interactions, topology mismatches, semantic fault injection, trace, checkpoint/replay, coverage, and invariant checking.
 
 Every major firmware interface must consider how the simulator observes it, synchronizes with it, injects failures, and verifies recovery.
 
@@ -149,36 +108,61 @@ Integrated on `main`:
 
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
-- `M00-02`: complete RV64 integer `TrapFrame`, shared assembly/C++ ABI, full save/restore path, known-register test, `TRAP_FRAME_TEST: PASS`.
-- `M00-03`: recoverable 32-bit `EBREAK` and 16-bit `C.EBREAK`, both returning through the common TrapFrame restore + `mret` path.
-- `M00-04`: recoverable machine timer interrupt; asynchronous return preserves saved `mepc`.
-- `F00-01`: Kernel Print foundation: shared freestanding formatter, 36 KiB append-only KernelLogBuffer, `printk`, and temporary raw-UART mirror.
-- M00-02 through M00-04 integrated by PR #6.
-- Console/timer conflict-resolved integration merged by PR #8.
-- Canonical console, concurrency-correctness, and trace-observability design records are present under `docs/`.
+- `M00-02`: complete RV64 integer `TrapFrame`, shared assembly/C++ ABI, full save/restore path.
+- `M00-03`: recoverable 32-bit `EBREAK` and 16-bit `C.EBREAK` through common restore + `mret`.
+- `M00-04`: recoverable machine timer interrupt.
+- `F00-01`: Kernel Print foundation.
+- `M00-05`: per-hart state, private stacks, dense HartIndex, boot rendezvous, FDT population discovery, per-hart timer state/compare, and SMP acceptance for 1/2/4 harts with controlled over-capacity rejection.
+- developer workflow helpers: `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, and `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+- AI-era RAS architecture/research records under `docs/`.
 
 Current queue:
 
 ```text
-ACTIVE  M00-05 Per-hart state, stacks, and SMP foundation
-NEXT    M00-06 Privilege transition foundation
+ACTIVE  M00-06 Privilege transition foundation
 NEXT    M00-07 Early physical allocator
 NEXT    M00-08 Structured event and trace ABI
+NEXT    M00-09 Automated QEMU test harness
 ```
 
-### M00-05 design boundary
+### M00-05 accepted invariants
 
-M00-05 is the first multi-hart foundation milestone. It must establish private per-hart stacks/state and a correct boot-hart/secondary-hart rendezvous before allowing secondary harts into normal C++ execution.
+- private per-hart stack before C/C++;
+- only boot hart owns BSS/global initialization;
+- explicit release/acquire publication;
+- atomic slot allocation for uniqueness;
+- `HartId` is architectural identity, `HartIndex` is a dense software slot;
+- physical topology belongs to PlatformGraph;
+- `HartLocal` is per-hart state and `mscratch` points to the current `HartLocal`;
+- per-hart/single-writer ownership is preferred to global locks;
+- only boot hart is a normal `printk` writer during the milestone.
 
-Do not infer socket/core/NUMA topology from arithmetic on `hart_id`. Hart identity is architectural state; physical topology belongs to PlatformGraph.
+Design record: `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
 
-Before adding shared synchronization, prefer per-hart ownership and document the RISC-V/C++ memory-order contract. See `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`.
+### M00-06 design boundary
 
-Kernel Print is intentionally not yet claimed to be multi-writer safe. M00-05 must define its concurrency policy before secondary harts use normal `printk` concurrently.
+M00-06 introduces the first controlled lower-privilege execution path.
+
+Initial target:
+
+```text
+M-mode Mozi
+    -> configure mstatus.MPP = S
+    -> configure mepc
+    -> mret
+    -> S-mode payload with satp = 0
+    -> controlled ecall/trap back to M-mode
+```
+
+The core new invariant is trap-stack trust: after S-mode controls its own `sp`, M-mode trap entry must not blindly use that lower-privilege stack as trusted kernel storage.
+
+M00-06 should use `mscratch -> HartLocal` to locate trusted per-hart kernel/trap state and preserve the interrupted lower-privilege stack pointer in the saved context.
+
+Do not mix privilege transition with paging, allocator, scheduler, service IPC, or PMP isolation in the first proof.
 
 ## 7. Console / observability boundary
 
-The minimum kernel diagnostic path is:
+Minimum kernel diagnostics remain:
 
 ```text
 printk
@@ -190,14 +174,29 @@ KernelLogBuffer
    `---- temporary UART mirror
 ```
 
-The future runtime Console Service is a separate execution/failure domain and remains deferred until tasks, IPC, service lifecycle, allocator/runtime, and device ownership exist.
+Console text, structured Trace, and structured RAS records are separate contracts.
 
-Console text, structured Trace, and structured RAS records are separate contracts. See:
+## 8. RAS direction
 
-- `docs/JIXIA_CONSOLE_DESIGN.md`
-- `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md`
+Jixia RAS keeps Power-style deterministic diagnostic rules as the trusted spine and adds AI-era capabilities around that spine:
 
-## 8. Frozen implementation scope
+- Structured Event ABI;
+- PlatformGraph/topology correlation;
+- Incident Graph;
+- Machine Health Journal;
+- Case Memory;
+- hypothesis-driven diagnosis and safe HWP probes;
+- Fleet rule mining;
+- Jingjie replay/counterfactual verification;
+- deterministic, auditable recovery policy.
+
+See:
+
+- `docs/JIXIA_RAS_ARCHITECTURE.md`
+- `docs/JIXIA_RAS_REASONING_VISION.md`
+- `docs/JIXIA_AI_RAS_ARCHITECTURE_SUMMARY.md`
+
+## 9. Frozen implementation scope
 
 The following remain long-term architecture topics but are not current implementation work:
 
@@ -210,24 +209,39 @@ The following remain long-term architecture topics but are not current implement
 
 They remain frozen until the Jingjie simulator prerequisites in `docs/JIXIA_SOLO_ROADMAP.md` are satisfied.
 
-## 9. New-conversation scan protocol
+## 10. Developer workflow
+
+Normal local entry points:
+
+```bash
+bash scripts/setup-dev-env.sh --check
+bash scripts/jixia.sh env
+bash scripts/jixia.sh build
+bash scripts/jixia.sh run --smp 4
+bash scripts/jixia.sh debug --smp 4
+```
+
+Detailed workflow: `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+
+Milestone acceptance scripts remain the source of truth for pass/fail; generic `jixia.sh run` does not replace machine-checkable gates.
+
+## 11. New-conversation scan protocol
 
 Before answering a Jixia/Firmware project question in a new chat:
 
-1. inspect `Pedroaliu/Firmware`, its default branch, progress branch, and latest commits;
+1. inspect `Pedroaliu/Firmware`, `main`, the current progress branch, and recent commits;
 2. read this file;
-3. read `docs/JIXIA_PROGRESS.md` to identify the single ACTIVE milestone;
-4. read `docs/JIXIA_SOLO_ROADMAP.md` for phase order and gates;
+3. read `docs/JIXIA_PROGRESS.md`;
+4. read `docs/JIXIA_SOLO_ROADMAP.md`;
 5. read `README.md`;
-6. read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`;
+6. read `docs/JIXIA_ARCHITECTURE_V0.3.md` and relevant design records;
 7. inspect current source paths, namespaces, build files, and tests;
-8. read relevant historical `ARCHFW_*` documents when useful;
-9. locate referenced PDFs through the active conversation or File Library;
-10. confirm the active simulator repository before editing it.
+8. locate referenced PDFs through the active conversation or File Library;
+9. confirm the active simulator repository before editing it.
 
 Repository state wins over remembered chat state unless the user explicitly says the repository is stale.
 
-## 10. Confirmed repositories
+## 12. Confirmed repositories
 
 ### Primary
 
@@ -243,11 +257,9 @@ Repository state wins over remembered chat state unless the user explicitly says
 
 ### External source
 
-- `open-power/hostboot`, reference branch `release-fw1120`.
+- `open-power/hostboot` — IBM/OpenPOWER host firmware source reference.
 
-The Firmware repository is never interchangeable with similarly named simulator repositories.
-
-## 11. Decisions not to forget
+## 13. Decisions not to forget
 
 - Jixia is not another EDK II implementation or mini-KVM.
 - Native Linux/KVM remains a supported future profile and comparison baseline.
@@ -255,15 +267,12 @@ The Firmware repository is never interchangeable with similarly named simulator 
 - The driver domain uses Linux endpoint drivers directly; host firmware manages platform control and ownership.
 - ACPI and DT are generated PlatformGraph views.
 - Kernel Print and the future Console Service are separate failure/runtime domains.
-- Trace and RAS must remain structured interfaces rather than being collapsed into `printk` text.
+- Trace and RAS remain structured interfaces rather than `printk` text.
 - Dynamic debug is cross-backend engineering infrastructure, not a production backdoor.
-- Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now, even though its runtime is deferred.
-- BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
-- Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
-- For concurrency, prefer ownership/per-hart partitioning before introducing shared locks; original algorithms require explicit correctness and memory-order arguments.
+- For concurrency, prefer ownership/per-hart partitioning before shared locks.
 - One active milestone at a time is a deliberate learning and quality strategy.
 
-## 12. Maintenance
+## 14. Maintenance
 
 Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, or learning/implementation workflow change.
 
