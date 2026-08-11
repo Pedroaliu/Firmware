@@ -20,36 +20,102 @@ set(JIXIA_ARCH_FLAGS
     -mcmodel=medany
 )
 
-set(JIXIA_COMMON_FLAGS
-    ${JIXIA_ARCH_FLAGS}
+set(JIXIA_LINKER_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
+)
 
-    -ffreestanding
-    -fno-builtin
-    -fno-stack-protector
-    -fno-pic
-    -fno-pie
+# CMAKE_OBJCOPY/CMAKE_OBJDUMP/CMAKE_READELF are FILEPATH cache variables.
+# Passing a bare command name such as "riscv64-unknown-elf-objcopy" on the
+# CMake command line may therefore be normalized into a non-existent path
+# relative to the source tree. That happened on the first GitHub Actions run:
+# the compiler linked jixia.elf successfully, but the POST_BUILD objcopy step
+# tried to execute <repo>/riscv64-unknown-elf-objcopy instead of /usr/bin/....
+#
+# Resolve the tools explicitly. Existing absolute tool paths are preserved;
+# otherwise search PATH, which keeps local development and clean CI runners
+# using the same contract.
+function(jixia_resolve_binutil out_var cmake_candidate fallback_name)
+    if(cmake_candidate AND
+       IS_ABSOLUTE "${cmake_candidate}" AND
+       EXISTS "${cmake_candidate}")
+        set(${out_var} "${cmake_candidate}" PARENT_SCOPE)
+        return()
+    endif()
 
-    -ffunction-sections
-    -fdata-sections
+    if(cmake_candidate)
+        get_filename_component(candidate_name "${cmake_candidate}" NAME)
+    else()
+        set(candidate_name "${fallback_name}")
+    endif()
 
-    -Wall
-    -Wextra
-    -Werror
+    set(resolved_var "${out_var}_RESOLVED")
+
+    find_program(
+        ${resolved_var}
+        NAMES
+            "${candidate_name}"
+            "${fallback_name}"
+        REQUIRED
+    )
+
+    set(${out_var} "${${resolved_var}}" PARENT_SCOPE)
+endfunction()
+
+jixia_resolve_binutil(
+    JIXIA_OBJCOPY
+    "${CMAKE_OBJCOPY}"
+    riscv64-unknown-elf-objcopy
+)
+
+jixia_resolve_binutil(
+    JIXIA_OBJDUMP
+    "${CMAKE_OBJDUMP}"
+    riscv64-unknown-elf-objdump
+)
+
+jixia_resolve_binutil(
+    JIXIA_READELF
+    "${CMAKE_READELF}"
+    riscv64-unknown-elf-readelf
 )
 
 add_executable(
     jixia.elf
 
+    # Keep the architectural entry source first for readability. The linker
+    # script independently pins .text.boot at 0x80000000, so correctness does
+    # not depend on this source-list ordering.
     microkernel/arch/riscv/start.S
     microkernel/arch/riscv/trap.S
+    microkernel/arch/riscv/trap_frame_test.S
+    microkernel/arch/riscv/instruction_decode.cpp
+
+    lib/format.cpp
+    microkernel/console/kernel_console.cpp
+    microkernel/console/printk.cpp
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
+    microkernel/core/timer.cpp
+    microkernel/core/smp_timer_test.cpp
+    microkernel/core/kernel_print_test.cpp
+    microkernel/core/recoverable_trap_test.cpp
+    microkernel/core/timer_interrupt_test.cpp
+    microkernel/core/trap_frame_test.cpp
+    platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
+    microkernel/arch/riscv/hart_layout.h
+    microkernel/core/hart.h
+    microkernel/core/hart.cpp
+    microkernel/core/smp_timer_test.h
+    microkernel/arch/riscv/hart_layout_defs.h
+    lib/fdt.h
+    lib/fdt.cpp
 )
 
 target_include_directories(
     jixia.elf
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/platform/qemu_virt
 )
@@ -57,7 +123,19 @@ target_include_directories(
 target_compile_options(
     jixia.elf
     PRIVATE
-        ${JIXIA_COMMON_FLAGS}
+        ${JIXIA_ARCH_FLAGS}
+
+        $<$<COMPILE_LANGUAGE:C,CXX>:-ffreestanding>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-builtin>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-stack-protector>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-pic>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-pie>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Werror>
+
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
         $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
         $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
@@ -77,7 +155,15 @@ target_link_options(
         -Wl,--build-id=none
         -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia.map
 
-        -T${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
+        -T${JIXIA_LINKER_SCRIPT}
+)
+
+# A linker script passed only with -T is not a reliable Ninja dependency on
+# every CMake/toolchain combination. Make it explicit so changing the firmware
+# memory layout always forces a relink.
+set_property(
+    TARGET jixia.elf
+    APPEND PROPERTY LINK_DEPENDS ${JIXIA_LINKER_SCRIPT}
 )
 
 add_custom_command(
@@ -85,13 +171,13 @@ add_custom_command(
     POST_BUILD
 
     COMMAND
-        ${CMAKE_OBJCOPY}
+        ${JIXIA_OBJCOPY}
         -O binary
         $<TARGET_FILE:jixia.elf>
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.bin
 
     COMMAND
-        ${CMAKE_OBJDUMP}
+        ${JIXIA_OBJDUMP}
         -d
         -S
         $<TARGET_FILE:jixia.elf>
@@ -99,7 +185,7 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.dis
 
     COMMAND
-        ${CMAKE_READELF}
+        ${JIXIA_READELF}
         -a
         $<TARGET_FILE:jixia.elf>
         >

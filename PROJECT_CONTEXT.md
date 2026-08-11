@@ -8,7 +8,8 @@
 
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
-- **Canonical branch:** `main`
+- **Stable integration branch:** `main`
+- **Current progress branch:** `milestone/m00-06-privilege-transition`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -16,11 +17,35 @@ Jixia studies what a machine looks like when firmware, logical partitions, RAS, 
 
 IBM POWER/PowerVM/LPAR and System z/CECSIM are studied as alternative systems perspectives to the dominant x86/Arm + Linux/KVM path. The goal is better trade-off reasoning, not a claim of universal superiority.
 
-## 2. Naming policy
+## 2. Development mode
+
+The project currently has one human developer working with ChatGPT as a research, teaching, architecture, review, debugging, and implementation partner.
+
+The project is intentionally single-threaded:
+
+```text
+NOW      exactly one primary milestone
+NEXT     at most three ordered milestones
+BACKLOG  accepted later work
+FROZEN   work blocked by architectural prerequisites
+```
+
+The canonical execution plan is `docs/JIXIA_SOLO_ROADMAP.md`. The canonical live status is `docs/JIXIA_PROGRESS.md`.
+
+Completed milestones merge promptly into `main`; new milestone branches start from the latest integrated checkpoint.
+
+### Learning/implementation workflow
+
+- ChatGPT may provide and commit complete reference implementations for syntax-heavy or repetitive scaffolding.
+- The developer is expected to understand architectural state transitions, invariants, failure modes, and debugging evidence.
+- New mechanisms are taught through complete reference code first, then explanation, guided modification, and progressively larger independent implementation tasks.
+- Debugging should prefer GDB, CSR/register state, disassembly, QEMU logs, and machine-checkable tests over guessing.
+
+## 3. Naming policy
 
 Jixia is the project and product brand.
 
-Chinese cultural names are **implementation codenames**, not source-code vocabulary. They may appear in architecture diagrams, releases, presentations, banners, and module descriptions. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
+Chinese cultural names are implementation codenames, not source-code vocabulary. Source directories, public interfaces, types, functions, schemas, and C++ namespaces use clear English technical meaning.
 
 | Codename | Technical responsibility | Semantic code location / namespace |
 |---|---|---|
@@ -41,27 +66,9 @@ Chinese cultural names are **implementation codenames**, not source-code vocabul
 
 For confidential computing, keep the technical name **Confidential LPAR** until a stable codename is deliberately chosen.
 
-### Language and ABI rule
+## 4. Architectural baseline
 
-- Minimum reset/assembly boundaries remain C-compatible.
-- Cross-language symbols use stable `jixia_` C ABI names.
-- Freestanding implementation code uses C++ nested namespaces.
-- Do not encode codenames into public symbol names, file paths, data schemas, or protocols.
-
-Current examples:
-
-```cpp
-namespace jixia::microkernel {}
-namespace jixia::microkernel::trap {}
-namespace jixia::platform::graph {}
-namespace jixia::hypervisor::scheduler {}
-namespace jixia::ras::diagnosis {}
-namespace jixia::debug::replay {}
-```
-
-## 3. Architectural baseline
-
-Jixia supports three execution profiles:
+Jixia retains three long-term execution profiles:
 
 ```text
 NATIVE_HOST
@@ -74,8 +81,6 @@ MULTI_LPAR
   Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
-A single LPAR is not automatically equivalent to native Linux/KVM. Linux must run in HS-mode to own the RISC-V H extension and act as an ordinary KVM host. A Linux partition under ArchHV runs in VS-mode unless nested virtualization is implemented.
-
 Core principles:
 
 1. Platform model first.
@@ -85,60 +90,162 @@ Core principles:
 5. Linux endpoint drivers live in a driver service domain.
 6. UEFI/ACPI/DT/U-Boot personalities are projections of one filtered PlatformGraph.
 7. Resource ownership has one authoritative manager.
-8. Partition identity eventually spans translation, interrupts, IOMMU, counters, trace, energy, and RAS.
-9. Debug/replay and fault injection are first-class architecture features.
-10. Protection, detection, and recovery are designed separately.
-11. Normal, measured, and confidential LPARs share one lifecycle model with different trust assumptions.
+8. Debug/replay and fault injection are first-class architecture features.
+9. Protection, detection, and recovery are designed separately.
+10. Firmware and the full-system simulator are co-designed.
 
-## 4. CECSIM-style co-design rule
+## 5. CECSIM-style co-design rule
 
-Jixia firmware and the full-system simulator are co-designed.
+Jixia firmware and Jingjie are co-designed.
 
-The simulator is an executable architecture specification and firmware-verification platform covering CPU/SoC execution, firmware state machines, LPARs, I/O, management interactions, topology mismatches, semantic fault injection, trace, checkpoint/replay, coverage, and invariant checking across functional, timing, cycle, and RTL modes.
+The simulator is an executable architecture specification and firmware-verification platform covering CPU/SoC execution, firmware state machines, LPARs, I/O, management interactions, topology mismatches, semantic fault injection, trace, checkpoint/replay, coverage, and invariant checking.
 
 Every major firmware interface must consider how the simulator observes it, synchronizes with it, injects failures, and verifies recovery.
 
-## 5. Current implementation state
+## 6. Current implementation state
 
-Completed:
+Integrated on `main`:
 
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
-- build artifacts renamed from `archfw.*` to `jixia.*`.
-- executable implementation moved to semantic `microkernel/` paths.
-- low-level C ABI now enters freestanding C++ code under `jixia::microkernel`.
+- `M00-02`: complete RV64 integer `TrapFrame`, shared assembly/C++ ABI, full save/restore path.
+- `M00-03`: recoverable 32-bit `EBREAK` and 16-bit `C.EBREAK` through common restore + `mret`.
+- `M00-04`: recoverable machine timer interrupt.
+- `F00-01`: Kernel Print foundation.
+- `M00-05`: per-hart state, private stacks, dense HartIndex, boot rendezvous, FDT population discovery, per-hart timer state/compare, and SMP acceptance for 1/2/4 harts with controlled over-capacity rejection.
+- developer workflow helpers: `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, and `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+- AI-era RAS architecture/research records under `docs/`.
 
-Next milestone:
+Current queue:
 
 ```text
-M00-02  Complete TrapFrame
-M00-03  Recoverable trap and mret
-M00-04  Timer interrupt
-M00-05  Per-hart state
-M00-06  Privilege transition
+ACTIVE  M00-06 Privilege transition foundation
+NEXT    M00-07 Early physical allocator
+NEXT    M00-08 Structured event and trace ABI
+NEXT    M00-09 Automated QEMU test harness
 ```
 
-Do not jump directly to Linux, migration, split-core, or memory encryption before the trap/privilege foundation is correct and testable.
+### M00-05 accepted invariants
 
-## 6. New-conversation scan protocol
+- private per-hart stack before C/C++;
+- only boot hart owns BSS/global initialization;
+- explicit release/acquire publication;
+- atomic slot allocation for uniqueness;
+- `HartId` is architectural identity, `HartIndex` is a dense software slot;
+- physical topology belongs to PlatformGraph;
+- `HartLocal` is per-hart state and `mscratch` points to the current `HartLocal`;
+- per-hart/single-writer ownership is preferred to global locks;
+- only boot hart is a normal `printk` writer during the milestone.
+
+Design record: `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
+
+### M00-06 design boundary
+
+M00-06 introduces the first controlled lower-privilege execution path.
+
+Initial target:
+
+```text
+M-mode Mozi
+    -> configure mstatus.MPP = S
+    -> configure mepc
+    -> mret
+    -> S-mode payload with satp = 0
+    -> controlled ecall/trap back to M-mode
+```
+
+The core new invariant is trap-stack trust: after S-mode controls its own `sp`, M-mode trap entry must not blindly use that lower-privilege stack as trusted kernel storage.
+
+M00-06 should use `mscratch -> HartLocal` to locate trusted per-hart kernel/trap state and preserve the interrupted lower-privilege stack pointer in the saved context.
+
+Do not mix privilege transition with paging, allocator, scheduler, service IPC, or PMP isolation in the first proof.
+
+## 7. Console / observability boundary
+
+Minimum kernel diagnostics remain:
+
+```text
+printk
+   |
+shared formatter
+   |
+KernelLogBuffer
+   |
+   `---- temporary UART mirror
+```
+
+Console text, structured Trace, and structured RAS records are separate contracts.
+
+## 8. RAS direction
+
+Jixia RAS keeps Power-style deterministic diagnostic rules as the trusted spine and adds AI-era capabilities around that spine:
+
+- Structured Event ABI;
+- PlatformGraph/topology correlation;
+- Incident Graph;
+- Machine Health Journal;
+- Case Memory;
+- hypothesis-driven diagnosis and safe HWP probes;
+- Fleet rule mining;
+- Jingjie replay/counterfactual verification;
+- deterministic, auditable recovery policy.
+
+See:
+
+- `docs/JIXIA_RAS_ARCHITECTURE.md`
+- `docs/JIXIA_RAS_REASONING_VISION.md`
+- `docs/JIXIA_AI_RAS_ARCHITECTURE_SUMMARY.md`
+
+## 9. Frozen implementation scope
+
+The following remain long-term architecture topics but are not current implementation work:
+
+- ArchHV and LPAR runtime;
+- HS/VS execution and G-stage translation;
+- virtual interrupt and virtual I/O;
+- Service LPAR;
+- confidential LPAR runtime;
+- secure migration.
+
+They remain frozen until the Jingjie simulator prerequisites in `docs/JIXIA_SOLO_ROADMAP.md` are satisfied.
+
+## 10. Developer workflow
+
+Normal local entry points:
+
+```bash
+bash scripts/setup-dev-env.sh --check
+bash scripts/jixia.sh env
+bash scripts/jixia.sh build
+bash scripts/jixia.sh run --smp 4
+bash scripts/jixia.sh debug --smp 4
+```
+
+Detailed workflow: `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+
+Milestone acceptance scripts remain the source of truth for pass/fail; generic `jixia.sh run` does not replace machine-checkable gates.
+
+## 11. New-conversation scan protocol
 
 Before answering a Jixia/Firmware project question in a new chat:
 
-1. Inspect `Pedroaliu/Firmware`, its default branch, and latest commits.
-2. Read `PROJECT_CONTEXT.md` and `README.md`.
-3. Read `docs/JIXIA_ARCHITECTURE_V0.3.md` and `docs/JIXIA_PROJECT_SOURCES.md`.
-4. Inspect current source paths, namespaces, build files, and milestone state.
-5. Read relevant historical `ARCHFW_*` documents when useful.
-6. Locate referenced PDFs through the current conversation or File Library using the source manifest.
-7. Confirm the active simulator repository before editing it.
+1. inspect `Pedroaliu/Firmware`, `main`, the current progress branch, and recent commits;
+2. read this file;
+3. read `docs/JIXIA_PROGRESS.md`;
+4. read `docs/JIXIA_SOLO_ROADMAP.md`;
+5. read `README.md`;
+6. read `docs/JIXIA_ARCHITECTURE_V0.3.md` and relevant design records;
+7. inspect current source paths, namespaces, build files, and tests;
+8. locate referenced PDFs through the active conversation or File Library;
+9. confirm the active simulator repository before editing it.
 
 Repository state wins over remembered chat state unless the user explicitly says the repository is stale.
 
-## 7. Confirmed repositories
+## 12. Confirmed repositories
 
 ### Primary
 
-- `Pedroaliu/Firmware` — Jixia firmware platform; `main` is canonical.
+- `Pedroaliu/Firmware` — Jixia firmware platform.
 
 ### Related
 
@@ -150,22 +257,23 @@ Repository state wins over remembered chat state unless the user explicitly says
 
 ### External source
 
-- `open-power/hostboot`, reference branch `release-fw1120`.
+- `open-power/hostboot` — IBM/OpenPOWER host firmware source reference.
 
-The Firmware repository is never interchangeable with similarly named simulator repositories.
-
-## 8. Decisions not to forget
+## 13. Decisions not to forget
 
 - Jixia is not another EDK II implementation or mini-KVM.
-- Native Linux/KVM remains a supported profile and comparison baseline.
-- LPAR is a logical-machine contract, not merely `vCPU + RAM`.
+- Native Linux/KVM remains a supported future profile and comparison baseline.
+- LPAR is a logical-machine contract, not merely `vCPU + RAM`, but its implementation is deferred until simulator prerequisites exist.
 - The driver domain uses Linux endpoint drivers directly; host firmware manages platform control and ownership.
 - ACPI and DT are generated PlatformGraph views.
+- Kernel Print and the future Console Service are separate failure/runtime domains.
+- Trace and RAS remain structured interfaces rather than `printk` text.
 - Dynamic debug is cross-backend engineering infrastructure, not a production backdoor.
-- Confidential computing constrains debug, DMA, RAS, attestation, and migration designs now.
-- BOOM and XiangShan are Core references; IBM POWER contributes partition/RAS/co-design ideas; CECSIM contributes the firmware-simulator verification method.
-- Cultural codenames give the project identity; semantic English names and `jixia::*` namespaces keep the implementation globally readable.
+- For concurrency, prefer ownership/per-hart partitioning before shared locks.
+- One active milestone at a time is a deliberate learning and quality strategy.
 
-## 9. Maintenance
+## 14. Maintenance
 
-Update this file whenever canonical names, naming policy, repositories, direction, milestone state, core sources, execution profiles, or trust assumptions change.
+Update this file whenever naming policy, repositories, project direction, working mode, ACTIVE milestone, feature gates, core sources, execution profiles, trust assumptions, or learning/implementation workflow change.
+
+Routine test results and milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md`.
