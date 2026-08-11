@@ -41,11 +41,11 @@ void bind_hart_local(
         reinterpret_cast<uintptr_t>(local);
 
     /*
-     * mscratch is machine-mode-owned per-hart state.
+     * mscratch is the machine-mode-owned per-hart anchor.
      *
-     * M00-05 only installs the HartLocal pointer.
-     * Later trap/privilege work can use HartLocal to find the dedicated
-     * kernel/trap stack without exposing this pointer to user mode.
+     * M00-06 trap entry uses it to reach trusted HartLocal state before it
+     * decides whether the interrupted stack belongs to M-mode or to lower
+     * privilege.
      */
     __asm__ volatile(
         "csrw mscratch, %0"
@@ -79,6 +79,8 @@ HartLocal& initialize(
     local.index = index;
     local.role = role;
     local.machine_timer_interrupt_count = 0U;
+    local.trap_entry_sp = 0U;
+    local.trap_entry_t1 = 0U;
 
 
     const uintptr_t stack_base =
