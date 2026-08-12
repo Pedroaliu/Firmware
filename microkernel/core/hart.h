@@ -66,15 +66,30 @@ struct alignas(64) HartLocal
     /*
      * Transient M-mode trap-entry scratch.
      *
-     * A trap arriving from lower privilege cannot trust the interrupted sp.
-     * trap.S first uses mscratch to reach this HartLocal, then temporarily
-     * parks the lower-privilege sp and t1 here while switching to trusted
-     * per-hart machine-mode stack storage.
+     * RISC-V does not bank x2/sp across privilege levels. On every runtime
+     * M-level trap, trap.S uses mscratch to reach this HartLocal, parks the
+     * interrupted sp and t1 here without dereferencing the interrupted stack,
+     * then switches to this hart's dedicated trusted trap stack.
      *
-     * These fields are non-nestable scratch, not persistent runtime state.
+     * These fields are non-nestable scratch, not persistent execution state.
      */
     uintptr_t trap_entry_sp;
     uintptr_t trap_entry_t1;
+
+    /*
+     * Trusted stack used by every runtime trap handled in M-mode, regardless
+     * of whether the interrupted context was M, S, or U.
+     */
+    uintptr_t trap_stack_bottom;
+    uintptr_t trap_stack_top;
+
+    /*
+     * Nested M-level traps are deliberately unsupported in M00-06.
+     * trap.S sets this before switching to the trap stack and fails closed if
+     * another trap arrives before the first one completes.
+     */
+    uint32_t trap_active;
+    uint32_t trap_reserved;
 };
 
 
@@ -112,6 +127,18 @@ static_assert(
 static_assert(
     offsetof(HartLocal, trap_entry_t1) ==
     HART_LOCAL_TRAP_ENTRY_T1_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_stack_bottom) ==
+    HART_LOCAL_TRAP_STACK_BOTTOM_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_stack_top) ==
+    HART_LOCAL_TRAP_STACK_TOP_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_active) ==
+    HART_LOCAL_TRAP_ACTIVE_OFFSET);
+static_assert(
+    offsetof(HartLocal, trap_reserved) ==
+    HART_LOCAL_TRAP_RESERVED_OFFSET);
 static_assert(sizeof(HartLocal) == HART_LOCAL_SIZE);
 static_assert(alignof(HartLocal) == 64U);
 
