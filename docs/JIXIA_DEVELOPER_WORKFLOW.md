@@ -3,8 +3,8 @@
 ## Status
 
 - **Type:** developer workflow and local tooling guide
-- **Scope:** local environment preparation, build, QEMU run, log capture, and GDB debug
-- **Primary scripts:** `scripts/setup-dev-env.sh`, `scripts/jixia.sh`
+- **Scope:** local environment preparation, build, QEMU run, log capture, GDB debug, and pre-commit quality checks
+- **Primary scripts:** `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, `scripts/pre-commit-check.sh`
 - **Default build directory:** `build/clion-debug`
 
 This document defines the normal local development entry points for Jixia.
@@ -12,6 +12,8 @@ This document defines the normal local development entry points for Jixia.
 The detailed workflow lives under `docs/` rather than expanding the top-level `README.md` into a tooling manual. The README remains the project/architecture entry point; this document is the canonical reference for developer setup and execution.
 
 The current default build directory deliberately remains `build/clion-debug` because it is already shared by `CMakePresets.json`, CLion, and the existing milestone regression scripts. A future build-layout change should update those consumers together rather than creating parallel build conventions.
+
+C/C++ formatting is defined by the repository-root `.clang-format`. See `docs/JIXIA_CODE_STYLE.md` for the formatting contract and incremental-adoption rule.
 
 ---
 
@@ -71,6 +73,12 @@ Today `jixia.sh` drives QEMU. Long term the same developer vocabulary can grow t
 configure -> build -> run/debug -> collect evidence
 ```
 
+### 2.5 Formatting and patch hygiene are repository contracts
+
+New or modified C/C++ lines must satisfy the repository `.clang-format`. Untouched historical code is not mass-reformatted as part of unrelated architecture work.
+
+Before a commit, the staged patch is checked for whitespace errors and clang-format compliance. GitHub Actions repeats those checks against the branch/main merge-base before building or running target tests.
+
 ---
 
 ## 3. Environment bootstrap
@@ -112,6 +120,7 @@ git
 cmake >= 3.20
 ninja
 python3
+clang-format
 GNU timeout
 
 qemu-system-riscv64
@@ -376,7 +385,65 @@ build/clion-debug/logs/debug-<timestamp>/
 
 ---
 
-## 11. Environment overrides
+## 11. Formatting and pre-commit checks
+
+The repository-root `.clang-format` is the canonical C/C++ style. CLion should be configured to honor the project file rather than an IDE-only personal style.
+
+Jixia currently uses attached braces for new/modified C/C++ code:
+
+```cpp
+bool ready() {
+    if (condition) {
+        return true;
+    }
+
+    return false;
+}
+```
+
+Assembly (`.S`) is intentionally excluded from automatic formatting enforcement.
+
+### Check working-tree C/C++ changes
+
+```bash
+bash scripts/check-format.sh
+```
+
+### Fix working-tree changed lines
+
+```bash
+bash scripts/check-format.sh --fix
+```
+
+### Check the staged commit
+
+```bash
+git add <files>
+bash scripts/pre-commit-check.sh
+```
+
+The pre-commit script runs:
+
+```text
+git diff --cached --check
+scripts/check-format.sh --cached
+```
+
+If staged formatting needs repair:
+
+```bash
+bash scripts/check-format.sh --cached --fix
+git add <reformatted-files>
+bash scripts/pre-commit-check.sh
+```
+
+GitHub CI runs the equivalent patch-hygiene and changed-line formatting gate against the merge-base with `main` before target build/test execution.
+
+Detailed style policy: `docs/JIXIA_CODE_STYLE.md`.
+
+---
+
+## 12. Environment overrides
 
 The generic developer command supports environment overrides for local experiments:
 
@@ -404,7 +471,7 @@ These are local developer overrides. Stable project requirements belong in repos
 
 ---
 
-## 12. Relationship to CMake presets and IDEs
+## 13. Relationship to CMake presets and IDEs
 
 `CMakePresets.json` remains the canonical IDE/manual debug preset and currently uses:
 
@@ -428,7 +495,7 @@ The scripts do not replace CMake. They provide a consistent human-facing workflo
 
 ---
 
-## 13. Relationship to milestone tests
+## 14. Relationship to milestone tests
 
 `scripts/jixia.sh run` is a generic interactive/reproducible execution command.
 
@@ -438,6 +505,8 @@ Milestone tests such as:
 scripts/test-kernel-print.sh
 scripts/test-timer-interrupt.sh
 scripts/test-m00-05-population.sh
+scripts/test-m00-06-02-supervisor-transition.sh
+scripts/test-m00-06-03-supervisor-transition.sh
 ```
 
 remain the acceptance source of truth for their milestones.
@@ -448,7 +517,7 @@ Long term, common launch/build code may be factored so generic developer command
 
 ---
 
-## 14. Expected future extensions
+## 15. Expected future extensions
 
 Possible later commands include:
 
@@ -471,19 +540,20 @@ This is intentionally future work. The current script should stay small enough t
 
 ---
 
-## 15. Troubleshooting order
+## 16. Troubleshooting order
 
 When a new developer cannot build or boot Jixia, use this order:
 
 ```text
 1. bash scripts/setup-dev-env.sh --check
 2. bash scripts/jixia.sh env
-3. bash scripts/jixia.sh build --reconfigure
-4. inspect build/clion-debug/jixia.elf and jixia.bin
-5. bash scripts/jixia.sh run --smp 1
-6. inspect the generated serial.log, qemu.log, and command.txt
-7. use bash scripts/jixia.sh debug when register/CSR evidence is required
-8. run the relevant milestone acceptance script
+3. bash scripts/check-format.sh when a style gate fails
+4. bash scripts/jixia.sh build --reconfigure
+5. inspect build/clion-debug/jixia.elf and jixia.bin
+6. bash scripts/jixia.sh run --smp 1
+7. inspect the generated serial.log, qemu.log, and command.txt
+8. use bash scripts/jixia.sh debug when register/CSR evidence is required
+9. run the relevant milestone acceptance script
 ```
 
 The project debugging rule remains: prefer observable evidence—build output, disassembly, CSR/register state, QEMU logs, structured tests, and GDB—over guessing.
