@@ -20,6 +20,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_06_03_PROBE
+    "Boot the M00-06.03 supervisor ECALL round-trip probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr
     -mabi=lp64
@@ -132,6 +138,14 @@ if(JIXIA_M00_06_02_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_06_02_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_06_03_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_06_03_PROBE=1
     )
 endif()
 
