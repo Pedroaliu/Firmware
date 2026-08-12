@@ -1,15 +1,23 @@
 #include <stdint.h>
 
 #include "microkernel/arch/riscv/instruction_decode.h"
+#include "microkernel/arch/riscv/privilege_transition_test_values.h"
 #include "microkernel/arch/riscv/trap_cause.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "microkernel/console/printk.h"
+#include "microkernel/core/hart.h"
 #include "microkernel/core/timer.h"
 
 extern "C" int jixia_trap_frame_test_is_active();
 extern "C" [[noreturn]]
 void jixia_trap_frame_test_finish(
     jixia::arch::riscv::TrapFrame* frame);
+
+#ifdef JIXIA_M00_06_03_PROBE
+extern "C" char jixia_m00_06_03_ecall_site[];
+extern "C" char __m00_06_02_supervisor_stack_bottom[];
+extern "C" char __m00_06_02_supervisor_stack_top[];
+#endif
 
 namespace jixia::microkernel::trap {
 
@@ -104,6 +112,82 @@ bool try_recover_breakpoint(TrapFrame& frame)
     return true;
 }
 
+#ifdef JIXIA_M00_06_03_PROBE
+namespace {
+
+constexpr Xlen kMstatusMppShift = 11U;
+constexpr Xlen kMstatusMppMask = 0x3U << kMstatusMppShift;
+constexpr Xlen kMstatusMppSupervisor = 0x1U << kMstatusMppShift;
+
+} // namespace
+
+[[nodiscard]]
+bool try_handle_supervisor_ecall(TrapFrame& frame) {
+    const TrapCause cause{frame.mcause};
+
+    if (!cause.is_exception(ExceptionCode::environment_call_from_s)) {
+        return false;
+    }
+
+    const uintptr_t expected_ecall_pc =
+        reinterpret_cast<uintptr_t>(jixia_m00_06_03_ecall_site);
+
+    if (frame.mepc != expected_ecall_pc) {
+        return false;
+    }
+
+    if ((frame.mstatus & kMstatusMppMask) != kMstatusMppSupervisor) {
+        return false;
+    }
+
+    if (frame.x[3] != M00_06_03_GP_MARKER ||
+        frame.x[10] != M00_06_03_A0_MARKER ||
+        frame.x[17] != M00_06_03_A7_MARKER) {
+        return false;
+    }
+
+    /*
+     * x2 is an interrupted register value, not trusted storage. It must point
+     * into the S probe stack, and an unused downward-growing stack may have
+     * x2 exactly equal to stack_top.
+     */
+    const uintptr_t supervisor_stack_bottom =
+        reinterpret_cast<uintptr_t>(__m00_06_02_supervisor_stack_bottom);
+    const uintptr_t supervisor_stack_top =
+        reinterpret_cast<uintptr_t>(__m00_06_02_supervisor_stack_top);
+    const uintptr_t saved_sp = frame.x[2];
+
+    if (saved_sp < supervisor_stack_bottom || saved_sp > supervisor_stack_top) {
+        return false;
+    }
+
+    /*
+     * The privileged frame itself must live entirely on current HartLocal's
+     * dedicated trusted M trap stack while the trap owns that stack.
+     */
+    const hart::HartLocal& local = hart::current();
+    const uintptr_t frame_address = reinterpret_cast<uintptr_t>(&frame);
+    const uintptr_t frame_end = frame_address + sizeof(TrapFrame);
+
+    if ((frame_address % TRAP_FRAME_ALIGNMENT) != 0U) {
+        return false;
+    }
+
+    if (frame_address < local.trap_stack_bottom ||
+        frame_end > local.trap_stack_top) {
+        return false;
+    }
+
+    if (local.trap_active != 1U) {
+        return false;
+    }
+
+    /* Validate first, mutate the future return context only after acceptance. */
+    frame.mepc += M00_06_03_ECALL_INSTRUCTION_BYTES;
+    return true;
+}
+#endif
+
 void dispatch(TrapFrame& frame)
 {
     if (try_handle_machine_timer_interrupt(frame))
@@ -115,6 +199,12 @@ void dispatch(TrapFrame& frame)
     {
         return;
     }
+
+#ifdef JIXIA_M00_06_03_PROBE
+    if (try_handle_supervisor_ecall(frame)) {
+        return;
+    }
+#endif
 
     fatal(frame);
 }
