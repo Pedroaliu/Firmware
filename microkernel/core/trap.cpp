@@ -129,8 +129,7 @@ bool try_handle_supervisor_ecall(TrapFrame& frame) {
         return false;
     }
 
-    const uintptr_t expected_ecall_pc =
-        reinterpret_cast<uintptr_t>(jixia_m00_06_03_ecall_site);
+    const uintptr_t expected_ecall_pc = reinterpret_cast<uintptr_t>(jixia_m00_06_03_ecall_site);
 
     if (frame.mepc != expected_ecall_pc) {
         return false;
@@ -140,8 +139,7 @@ bool try_handle_supervisor_ecall(TrapFrame& frame) {
         return false;
     }
 
-    if (frame.x[3] != M00_06_03_GP_MARKER ||
-        frame.x[10] != M00_06_03_A0_MARKER ||
+    if (frame.x[3] != M00_06_03_GP_MARKER || frame.x[10] != M00_06_03_A0_MARKER ||
         frame.x[17] != M00_06_03_A7_MARKER) {
         return false;
     }
@@ -173,8 +171,7 @@ bool try_handle_supervisor_ecall(TrapFrame& frame) {
         return false;
     }
 
-    if (frame_address < local.trap_stack_bottom ||
-        frame_end > local.trap_stack_top) {
+    if (frame_address < local.trap_stack_bottom || frame_end > local.trap_stack_top) {
         return false;
     }
 
