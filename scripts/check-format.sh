@@ -20,6 +20,7 @@ fi
 
 python3 - "${ROOT_DIR}" "$@" <<'PY'
 import argparse
+import difflib
 import os
 import re
 import subprocess
@@ -131,26 +132,59 @@ def add_untracked_sources(ranges):
             ranges[path] = None
 
 
-def check_one(path, ranges):
+def clang_format_command(path, ranges, *, write=False):
     command = ["clang-format", "--style=file"]
-
-    if args.fix:
+    if write:
         command.append("-i")
-    else:
-        command.extend(["--dry-run", "--Werror"])
-
     if ranges is not None:
         for start, end in merge_ranges(ranges):
             command.append(f"--lines={start}:{end}")
-
     command.append(path)
-    result = run(command, capture=True, check=False)
+    return command
+
+
+def print_repair_diff(path, ranges):
+    with open(path, "r", encoding="utf-8") as source:
+        original = source.read()
+
+    formatted = run(
+        clang_format_command(path, ranges),
+        capture=True,
+        check=False,
+    )
+    if formatted.returncode != 0:
+        return
+
+    diff = difflib.unified_diff(
+        original.splitlines(keepends=True),
+        formatted.stdout.splitlines(keepends=True),
+        fromfile=path,
+        tofile=f"{path} (clang-format)",
+    )
+    text = "".join(diff)
+    if text:
+        print(text, file=sys.stderr, end="" if text.endswith("\n") else "\n")
+
+
+def check_one(path, ranges):
+    if args.fix:
+        result = run(
+            clang_format_command(path, ranges, write=True),
+            capture=True,
+            check=False,
+        )
+    else:
+        command = clang_format_command(path, ranges)
+        command[2:2] = ["--dry-run", "--Werror"]
+        result = run(command, capture=True, check=False)
 
     if result.returncode != 0:
         if result.stdout:
             sys.stdout.write(result.stdout)
         if result.stderr:
             sys.stderr.write(result.stderr)
+        if not args.fix:
+            print_repair_diff(path, ranges)
         return False
     return True
 
