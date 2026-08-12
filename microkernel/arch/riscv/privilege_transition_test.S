@@ -200,8 +200,14 @@ jixia_m00_06_03_ecall_site:
 
 .global jixia_m00_06_03_after_ecall
 jixia_m00_06_03_after_ecall:
-    /* Prove common restore returned the original S stack pointer exactly. */
+    /*
+     * gp is deliberately still a marker here. Prevent linker relaxation from
+     * turning this address materialization into an access that depends on gp.
+     */
+    .option push
+    .option norelax
     la t0, __m00_06_02_supervisor_stack_top
+    .option pop
     andi t0, t0, -16
     bne sp, t0, .Lsupervisor_ecall_return_fail
 
