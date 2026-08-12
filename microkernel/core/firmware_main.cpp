@@ -12,7 +12,8 @@ extern "C" void jixia_recoverable_trap_test();
 extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
-extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
+extern "C" [[noreturn]]
+void jixia_m00_06_03_enter_supervisor_ecall();
 
 
 namespace jixia::microkernel {
@@ -182,15 +183,14 @@ void boot_main(
      * The actual S-entry marker is emitted only after mret and after the S
      * probe has installed its own stack.
      */
-    printk(
-        "\n"
-        "[Jixia][M00-06.03][PrivilegeTransition]\n"
-        "satp        : bare (0)\n"
-        "medeleg     : 0\n"
-        "mideleg     : 0\n"
-        "pmp0        : permissive RWX NAPOT (probe only)\n"
-        "async M irq : disabled\n"
-        "M00_06_03_ECALL_ARMED: PASS\n");
+    printk("\n"
+           "[Jixia][M00-06.03][PrivilegeTransition]\n"
+           "satp        : bare (0)\n"
+           "medeleg     : 0\n"
+           "mideleg     : 0\n"
+           "pmp0        : permissive RWX NAPOT (probe only)\n"
+           "async M irq : disabled\n"
+           "M00_06_03_ECALL_ARMED: PASS\n");
 
     jixia_m00_06_03_enter_supervisor_ecall();
 #else
