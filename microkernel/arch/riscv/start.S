@@ -60,6 +60,24 @@ jixia_boot_release:
 .global __hart_stacks_end
 __hart_stacks_end:
 
+/*
+ * Dedicated trusted runtime M-mode trap stacks.
+ *
+ * Once HartLocal is installed, every M-level trap switches here before
+ * constructing a TrapFrame. This keeps normal M call frames and trap frames
+ * in separate ownership domains.
+ */
+.section .stack.harts.trap, "aw", @nobits
+
+.balign HART_TRAP_STACK_ALIGNMENT
+.global __hart_trap_stacks_start
+__hart_trap_stacks_start:
+
+    .space HART_MAX_COUNT * HART_TRAP_STACK_SIZE
+
+.global __hart_trap_stacks_end
+__hart_trap_stacks_end:
+
 .section .text.boot, "ax", @progbits
 
 .global _start
@@ -302,4 +320,3 @@ __hart_stacks_end:
 
 
  .size _start, . - _start
-

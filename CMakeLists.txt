@@ -14,6 +14,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(
+    JIXIA_M00_06_02_PROBE
+    "Boot the M00-06.02 one-way M-to-S supervisor transition probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr
     -mabi=lp64
@@ -88,6 +94,7 @@ add_executable(
     microkernel/arch/riscv/start.S
     microkernel/arch/riscv/trap.S
     microkernel/arch/riscv/trap_frame_test.S
+    microkernel/arch/riscv/privilege_transition_test.S
     microkernel/arch/riscv/instruction_decode.cpp
 
     lib/format.cpp
@@ -119,6 +126,14 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/platform/qemu_virt
 )
+
+if(JIXIA_M00_06_02_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_06_02_PROBE=1
+    )
+endif()
 
 target_compile_options(
     jixia.elf

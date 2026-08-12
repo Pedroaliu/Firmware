@@ -66,6 +66,10 @@ jobs:
         run: |
           bash scripts/test-m00-05-population.sh
 
+      - name: M00-06.02 supervisor transition
+        run: |
+          bash scripts/test-m00-06-02-supervisor-transition.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -81,3 +85,4 @@ jobs:
             build/clion-debug/jixia.readelf
             build/clion-debug/*.log
             build/clion-debug/logs/
+            build/m00-06-02/

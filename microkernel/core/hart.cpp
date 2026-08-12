@@ -8,6 +8,7 @@
 namespace {
 
 extern "C" char __hart_stacks_start[];
+extern "C" char __hart_trap_stacks_start[];
 
 
 /*
@@ -44,8 +45,7 @@ void bind_hart_local(
      * mscratch is the machine-mode-owned per-hart anchor.
      *
      * M00-06 trap entry uses it to reach trusted HartLocal state before it
-     * decides whether the interrupted stack belongs to M-mode or to lower
-     * privilege.
+     * touches the interrupted stack.
      */
     __asm__ volatile(
         "csrw mscratch, %0"
@@ -81,19 +81,28 @@ HartLocal& initialize(
     local.machine_timer_interrupt_count = 0U;
     local.trap_entry_sp = 0U;
     local.trap_entry_t1 = 0U;
+    local.trap_active = 0U;
+    local.trap_reserved = 0U;
 
 
     const uintptr_t stack_base =
         reinterpret_cast<uintptr_t>(__hart_stacks_start)
         + static_cast<uintptr_t>(index) * kBootStackSize;
 
-
     local.stack_bottom = stack_base;
     local.stack_top = stack_base + kBootStackSize;
 
 
+    const uintptr_t trap_stack_base =
+        reinterpret_cast<uintptr_t>(__hart_trap_stacks_start)
+        + static_cast<uintptr_t>(index) * kTrapStackSize;
+
+    local.trap_stack_bottom = trap_stack_base;
+    local.trap_stack_top = trap_stack_base + kTrapStackSize;
+
+
     /*
-     * This CSR becomes the fast per-hart anchor.
+     * Bind only after every field required by trap.S is initialized.
      */
     bind_hart_local(&local);
 

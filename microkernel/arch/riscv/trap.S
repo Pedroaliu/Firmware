@@ -1,17 +1,7 @@
 #include "microkernel/arch/riscv/hart_local_abi.h"
 #include "microkernel/arch/riscv/trap_frame.h"
 
-/*
- * mstatus.MPP is a two-bit field at [12:11].
- *
- *   00 = U
- *   01 = S
- *   11 = M
- *
- * M00-06.01 only needs to distinguish M-origin traps from traps that
- * originated below M-mode. The latter must never construct privileged state
- * through the interrupted lower-privilege sp.
- */
+/* mstatus.MPP occupies bits [12:11]. */
 #define MSTATUS_MPP_SHIFT 11
 
 
@@ -25,13 +15,7 @@
  * TrapFrame helpers
  * --------------------------------------------------------------------------
  *
- * Keep these macros local to trap.S for now. Their semantic contract is not
- * a generic push/pop ABI: they specifically assume that sp is the base of a
- * jixia::arch::riscv::TrapFrame.
- *
- * If a second assembly consumer later uses exactly this TrapFrame ABI, these
- * helpers can move to a dedicated trap_frame_asm.inc rather than a generic
- * common.inc.
+ * These helpers assume sp is the base of a jixia::arch::riscv::TrapFrame.
  */
 .macro SAVE_GPR reg, offset
     sd \reg, \offset(sp)
@@ -55,10 +39,7 @@
 .endm
 
 
-/*
- * Save all GPRs except sp/t0/t1. Those three participate in the trusted-stack
- * entry protocol and are saved explicitly by each entry path.
- */
+/* Save all GPRs except sp/t0/t1, which participate in entry switching. */
 .macro SAVE_COMMON_GPRS
     SAVE_GPR zero, TRAP_FRAME_X0_OFFSET
     SAVE_GPR ra,   TRAP_FRAME_X1_OFFSET
@@ -98,10 +79,7 @@
 .endm
 
 
-/*
- * A lower-privilege payload is free to use gp for its own ABI. Save that gp
- * first, then re-establish Jixia's global pointer before entering C++.
- */
+/* Re-establish the firmware gp before calling C++ from any previous mode. */
 .macro LOAD_KERNEL_GP
     .option push
     .option norelax
@@ -118,21 +96,23 @@
  * ==========================================================================
  *
  * RISC-V hardware has already entered M-mode and recorded trap metadata in
- * mepc/mcause/mtval/mstatus. It has NOT saved the GPRs and it has NOT changed
- * sp.
+ * mepc/mcause/mtval/mstatus. It has NOT saved GPRs and it has NOT changed sp.
  *
- * Security invariant:
+ * Runtime policy after HartLocal is installed:
  *
- *   a trap from below M-mode must never write privileged TrapFrame state via
- *   an interrupted sp controlled by that lower-privilege context.
+ *   M-origin trap -> dedicated per-hart trusted M trap stack
+ *   S-origin trap -> dedicated per-hart trusted M trap stack
+ *   U-origin trap -> dedicated per-hart trusted M trap stack
+ *
+ * The interrupted x2/sp is always preserved as a VALUE before switching. It
+ * is never dereferenced by trap entry. This keeps normal M execution, lower
+ * privilege execution, and trap execution in separate stack domains.
  */
 .global jixia_trap_entry
 .type jixia_trap_entry, @function
 
 jixia_trap_entry:
     /*
-     * Obtain the per-hart trusted anchor without losing interrupted t0.
-     *
      * Normal bound state before:
      *
      *     t0       = interrupted t0
@@ -145,69 +125,33 @@ jixia_trap_entry:
      */
     csrrw t0, mscratch, t0
 
-    /*
-     * Zero means hart::initialize() has not installed HartLocal yet. This is
-     * valid only during early M-mode bootstrap, and that assumption is checked
-     * below rather than trusted implicitly.
-     */
+    /* Zero means hart::initialize() has not installed HartLocal yet. */
     beqz t0, .Ltrap_anchor_not_installed
 
     /*
-     * HartLocal exists. Preserve interrupted t1 in trusted per-hart storage
-     * before using t1 to inspect mstatus.MPP.
+     * Park values that must be preserved before t1/sp become entry scratch.
+     * HartLocal is trusted per-hart M-mode state; the interrupted sp is not
+     * dereferenced here even when the trap originated in M-mode.
      */
     sd t1, HART_LOCAL_TRAP_ENTRY_T1_OFFSET(t0)
-
-    csrr t1, mstatus
-    srli t1, t1, MSTATUS_MPP_SHIFT
-    andi t1, t1, 3
-
-    /* MPP == 3 means the interrupted context was already M-mode. */
-    xori t1, t1, 3
-    beqz t1, .Ltrap_from_machine
-
-    /* U/S (and any reserved non-M value) use the lower-privilege path. */
-    j .Ltrap_from_lower
-
-
-/*
- * ==========================================================================
- * HartLocal installed, M -> M trap
- * ==========================================================================
- *
- * The interrupted sp is already a trusted Jixia M-mode stack. Undo the small
- * entry probe and preserve the existing M00-02/M00-03/M00-04 behavior.
- */
-.Ltrap_from_machine:
-    ld t1, HART_LOCAL_TRAP_ENTRY_T1_OFFSET(t0)
-
-    /*
-     * Before:
-     *     t0       = HartLocal*
-     *     mscratch = interrupted t0
-     *
-     * After:
-     *     t0       = interrupted t0
-     *     mscratch = HartLocal*
-     */
-    csrrw t0, mscratch, t0
-
-    j .Lsave_on_current_machine_stack
-
-
-/*
- * ==========================================================================
- * Lower privilege -> M trap
- * ==========================================================================
- *
- * The interrupted sp is untrusted. Record its VALUE only; never dereference
- * memory through it.
- */
-.Ltrap_from_lower:
     sd sp, HART_LOCAL_TRAP_ENTRY_SP_OFFSET(t0)
 
-    /* Switch to the trusted per-hart M-mode stack allocation. */
-    ld sp, HART_LOCAL_STACK_TOP_OFFSET(t0)
+    /*
+     * Nested/double traps are intentionally unsupported in M00-06. If a trap
+     * occurs while a previous M-level trap is active, stop without touching
+     * memory through the interrupted stack or overwriting the outer frame.
+     */
+    lw t1, HART_LOCAL_TRAP_ACTIVE_OFFSET(t0)
+    bnez t1, .Ltrap_runtime_fail_closed
+
+    li t1, 1
+    sw t1, HART_LOCAL_TRAP_ACTIVE_OFFSET(t0)
+
+    /* A bound HartLocal must have a valid dedicated trap stack. */
+    ld t1, HART_LOCAL_TRAP_STACK_TOP_OFFSET(t0)
+    beqz t1, .Ltrap_runtime_fail_closed
+
+    mv sp, t1
     addi sp, sp, -TRAP_FRAME_SIZE
 
     /* Interrupted t0 was parked in mscratch by the first csrrw. */
@@ -218,7 +162,7 @@ jixia_trap_entry:
     ld t1, HART_LOCAL_TRAP_ENTRY_T1_OFFSET(t0)
     sd t1, TRAP_FRAME_X6_OFFSET(sp)
 
-    /* Save the lower-privilege stack pointer itself, not memory through it. */
+    /* Save interrupted x2/sp itself, not memory through it. */
     ld t1, HART_LOCAL_TRAP_ENTRY_SP_OFFSET(t0)
     sd t1, TRAP_FRAME_X2_OFFSET(sp)
 
@@ -240,9 +184,9 @@ jixia_trap_entry:
  *     t0       = 0
  *     mscratch = interrupted t0
  *
- * The intended state is early M-mode bootstrap. Prove that with MPP before
- * trusting the current stack. If lower privilege somehow traps here, fail
- * closed without touching memory through its sp.
+ * The only supported unbound state is early M-mode bootstrap. Prove MPP=M
+ * before using the current stack. A lower-origin trap without a trusted
+ * anchor fails closed using registers only.
  */
 .Ltrap_anchor_not_installed:
     csrr t0, mstatus
@@ -252,45 +196,48 @@ jixia_trap_entry:
 
     bnez t0, .Ltrap_no_trusted_anchor
 
-    /*
-     * MPP was M, so t0 is zero after xori. Exchange again to restore the
-     * interrupted t0 and re-establish the explicit unbound mscratch == 0
-     * state.
-     */
+    /* Restore interrupted t0 and explicit unbound mscratch == 0 state. */
     csrrw t0, mscratch, t0
 
-    j .Lsave_on_current_machine_stack
+    j .Lsave_on_early_machine_stack
+
+
+.Ltrap_no_trusted_anchor:
+    csrw mscratch, zero
+    j .Ltrap_register_only_halt
 
 
 /*
- * Lower-privilege trap with no trusted per-hart anchor. There is no safe C++
- * call or stack-based diagnostic path here yet, so stop using only registers.
+ * Runtime invariant failure: nested trap or missing trap-stack state.
+ * Do not attempt stack-based diagnostics because stack ownership is no longer
+ * trustworthy enough for recovery.
  */
-.Ltrap_no_trusted_anchor:
+.Ltrap_runtime_fail_closed:
     csrw mscratch, zero
+
+.Ltrap_register_only_halt:
     csrci mstatus, 8
     csrw mie, zero
 
-.Ltrap_no_trusted_anchor_halt:
+.Ltrap_register_only_halt_loop:
     wfi
-    j .Ltrap_no_trusted_anchor_halt
+    j .Ltrap_register_only_halt_loop
 
 
 /*
  * ==========================================================================
- * Trusted current-stack save path
+ * Early bootstrap M -> M save path
  * ==========================================================================
  *
- * All interrupted GPR values are live on entry here, and the current sp is an
- * M-mode-owned stack.
+ * Runtime traps never use this path. It exists only for the explicit
+ * pre-HartLocal bootstrap state, where the current M stack is the only trusted
+ * storage available.
  */
-.Lsave_on_current_machine_stack:
+.Lsave_on_early_machine_stack:
     addi sp, sp, -TRAP_FRAME_SIZE
 
-    /* t0 must be saved before it becomes CSR scratch. */
     SAVE_GPR t0, TRAP_FRAME_X5_OFFSET
 
-    /* Recover the interrupted M-mode sp. */
     addi t0, sp, TRAP_FRAME_SIZE
     sd   t0, TRAP_FRAME_X2_OFFSET(sp)
 
@@ -309,7 +256,7 @@ jixia_trap_entry:
     SAVE_CSR mcause,  TRAP_FRAME_MCAUSE_OFFSET
     SAVE_CSR mtval,   TRAP_FRAME_MTVAL_OFFSET
 
-    /* The interrupted gp is already in TrapFrame. Restore the kernel ABI. */
+    /* Interrupted gp is already in TrapFrame. Restore the firmware ABI. */
     LOAD_KERNEL_GP
 
     /* jixia_trap_dispatch(TrapFrame *frame) */
@@ -332,6 +279,18 @@ jixia_trap_entry:
 .type jixia_trap_restore, @function
 
 jixia_trap_restore:
+    /*
+     * Runtime entry marked trap_active before using the dedicated trap stack.
+     * Early bootstrap has mscratch == 0 and skips this bookkeeping.
+     *
+     * t0 is safe scratch here because its interrupted value remains in the
+     * TrapFrame until RESTORE_GPR t0 below.
+     */
+    csrr t0, mscratch
+    beqz t0, .Ltrap_restore_csrs
+    sw zero, HART_LOCAL_TRAP_ACTIVE_OFFSET(t0)
+
+.Ltrap_restore_csrs:
     RESTORE_CSR mstatus, TRAP_FRAME_MSTATUS_OFFSET
     RESTORE_CSR mepc,    TRAP_FRAME_MEPC_OFFSET
 
@@ -368,9 +327,7 @@ jixia_trap_restore:
 
     /*
      * No TrapFrame access is legal after restoring sp.
-     *
-     * M-origin frame -> interrupted M sp
-     * S/U-origin frame -> interrupted lower-privilege sp
+     * TrapFrame.x2 always contains the interrupted x2/sp value.
      */
     RESTORE_GPR sp, TRAP_FRAME_X2_OFFSET
 

@@ -11,6 +11,7 @@ extern "C" void jixia_kernel_print_test();
 extern "C" void jixia_recoverable_trap_test();
 extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
+extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
 
 
 namespace jixia::microkernel {
@@ -64,9 +65,7 @@ void boot_main(
     uintptr_t dtb_address,
     hart::HartIndex hart_index)
 {
-    /*
-     * Boot hart owns slot 0.
-     */
+    /* Boot hart owns slot 0. */
     hart::HartLocal& boot_local = hart::initialize(
         hart_id,
         hart_index,
@@ -75,7 +74,6 @@ void boot_main(
 
     /*
      * Only the boot hart writes printk during M00-05.
-     *
      * Therefore enabling the UART mirror here does not introduce concurrent
      * console writers.
      */
@@ -154,18 +152,33 @@ void boot_main(
         present_count);
 
 
-    /*
-     * Completed foundations remain live regressions after the SMP probe.
-     */
+    /* Completed foundations remain live regressions after the SMP probe. */
     jixia_kernel_print_test();
     jixia_recoverable_trap_test();
     jixia_machine_timer_test();
 
 
+#ifdef JIXIA_M00_06_02_PROBE
     /*
-     * Parks the boot hart after validating the saved context.
+     * The dedicated M00-06.02 build proves the one-way M -> S transition.
+     * The ordinary regression build still terminates in the full TrapFrame
+     * test below, so M00-02 evidence remains independently machine-checkable.
      */
+    printk(
+        "\n"
+        "[Jixia][M00-06.02][PrivilegeTransition]\n"
+        "satp        : bare (0)\n"
+        "medeleg     : 0\n"
+        "mideleg     : 0\n"
+        "pmp0        : permissive RWX NAPOT (probe only)\n"
+        "async M irq : disabled\n"
+        "M00_06_02_TRANSITION_ARMED: PASS\n");
+
+    jixia_m00_06_02_enter_supervisor();
+#else
+    /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();
+#endif
 }
 
 

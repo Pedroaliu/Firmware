@@ -4,6 +4,7 @@
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "microkernel/arch/riscv/trap_frame_test_values.h"
 #include "microkernel/console/printk.h"
+#include "microkernel/core/hart.h"
 
 extern "C" {
 volatile uintptr_t jixia_trap_test_active = 0;
@@ -73,6 +74,15 @@ bool check_gpr(
 [[noreturn]] void finish(const TrapFrame& frame)
 {
     const TrapCause cause{frame.mcause};
+    const hart::HartLocal& local = hart::current();
+    const uintptr_t frame_address =
+        reinterpret_cast<uintptr_t>(&frame);
+    const uintptr_t frame_end =
+        frame_address + sizeof(TrapFrame);
+
+    const bool frame_on_trap_stack =
+        frame_address >= local.trap_stack_bottom &&
+        frame_end <= local.trap_stack_top;
 
     printk("\n[Jixia][Test][TrapFrame]\n");
 
@@ -81,7 +91,15 @@ bool check_gpr(
     passed &= check_value(
         "frame alignment",
         0U,
-        reinterpret_cast<uintptr_t>(&frame) % TRAP_FRAME_ALIGNMENT);
+        frame_address % TRAP_FRAME_ALIGNMENT);
+    passed &= check_value(
+        "trusted trap stack",
+        1U,
+        frame_on_trap_stack ? 1U : 0U);
+    passed &= check_value(
+        "trap active",
+        1U,
+        static_cast<uintptr_t>(local.trap_active));
     passed &= check_value("x0", 0U, frame.x[0]);
     passed &= check_value(
         "saved sp",
