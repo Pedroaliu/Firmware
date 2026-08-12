@@ -9,7 +9,7 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-06-privilege-transition`
+- **Current progress branch:** `milestone/m00-06-03-supervisor-ecall-return`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -104,7 +104,7 @@ Every major firmware interface must consider how the simulator observes it, sync
 
 ## 6. Current implementation state
 
-Integrated on `main`:
+Integrated/accepted baseline:
 
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
@@ -113,16 +113,20 @@ Integrated on `main`:
 - `M00-04`: recoverable machine timer interrupt.
 - `F00-01`: Kernel Print foundation.
 - `M00-05`: per-hart state, private stacks, dense HartIndex, boot rendezvous, FDT population discovery, per-hart timer state/compare, and SMP acceptance for 1/2/4 harts with controlled over-capacity rejection.
+- `M00-06.01`: trusted M trap entry; lower-privilege x2/sp is never treated as trusted stack storage before switching domains.
+- `M00-06.02`: dedicated per-hart runtime M trap stacks for M/S/U-origin traps plus the first controlled M->S supervisor entry with its own S stack, `satp=0`, explicit no-delegation policy, and a permissive unlocked PMP probe entry.
 - developer workflow helpers: `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, and `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
 - AI-era RAS architecture/research records under `docs/`.
+
+M00-06.02 acceptance evidence: GitHub Actions run `31567837192`; all prior regressions and the dedicated supervisor-transition test passed.
 
 Current queue:
 
 ```text
-ACTIVE  M00-06 Privilege transition foundation
+ACTIVE  M00-06.03 S->M ECALL round trip
+NEXT    M00-06.04 hostile lower-privilege stack / M00-06 closure
 NEXT    M00-07 Early physical allocator
 NEXT    M00-08 Structured event and trace ABI
-NEXT    M00-09 Automated QEMU test harness
 ```
 
 ### M00-05 accepted invariants
@@ -139,26 +143,33 @@ NEXT    M00-09 Automated QEMU test harness
 
 Design record: `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
 
-### M00-06 design boundary
+### M00-06 accepted stack/trust model
 
-M00-06 introduces the first controlled lower-privilege execution path.
+RISC-V does not bank x2/sp by privilege level. Jixia therefore treats stack ownership as software state rather than a hardware property.
 
-Initial target:
+Accepted per-hart runtime layout:
 
 ```text
-M-mode Mozi
-    -> configure mstatus.MPP = S
-    -> configure mepc
-    -> mret
-    -> S-mode payload with satp = 0
-    -> controlled ecall/trap back to M-mode
+normal M stack
+    ordinary M-mode firmware calls
+
+trusted M trap stack
+    every runtime trap handled in M-mode
+    M -> M
+    S -> M
+    U -> M
+
+S stack
+    supervisor payload
 ```
 
-The core new invariant is trap-stack trust: after S-mode controls its own `sp`, M-mode trap entry must not blindly use that lower-privilege stack as trusted kernel storage.
+Once `mscratch -> HartLocal` exists, runtime trap entry preserves interrupted x2/sp as a value, switches to `HartLocal.trap_stack_top`, constructs the TrapFrame there, and retains `mstatus.MPP` only for origin/return semantics rather than stack selection.
 
-M00-06 should use `mscratch -> HartLocal` to locate trusted per-hart kernel/trap state and preserve the interrupted lower-privilege stack pointer in the saved context.
+M00-06.02 intentionally uses a permissive, unlocked PMP entry only so the S-mode transition probe can execute/use RAM/UART. It does **not** claim PMP-backed isolation; service isolation remains later work.
 
-Do not mix privilege transition with paging, allocator, scheduler, service IPC, or PMP isolation in the first proof.
+M00-06.03 now adds the first S-mode `ecall` back to M and must prove `mcause=9`, `MPP=S`, saved S stack/register state, `mepc`, and trusted TrapFrame storage.
+
+Do not mix the current privilege proof with paging, allocator, scheduler, service IPC, or real PMP isolation.
 
 ## 7. Console / observability boundary
 
