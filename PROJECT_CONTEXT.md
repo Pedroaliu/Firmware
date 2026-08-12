@@ -9,7 +9,7 @@
 - **Project/platform name:** 稷下 / **Jixia**
 - **Primary repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-06-03-supervisor-ecall-return`
+- **Current progress branch:** `milestone/m00-06-04-privilege-boundary-acceptance`
 - **Project type:** RISC-V firmware-native server platform research project
 - **Purpose:** learning, architecture exploration, and executable system research—not a short path to a commercial UEFI/KVM clone
 
@@ -40,6 +40,8 @@ Completed milestones merge promptly into `main`; new milestone branches start fr
 - The developer is expected to understand architectural state transitions, invariants, failure modes, and debugging evidence.
 - New mechanisms are taught through complete reference code first, then explanation, guided modification, and progressively larger independent implementation tasks.
 - Debugging should prefer GDB, CSR/register state, disassembly, QEMU logs, and machine-checkable tests over guessing.
+- C/C++ formatting is repository-defined through `.clang-format`; changed C/C++ lines are checked locally and in CI.
+- Assembly remains hand-formatted where register ownership and privilege-flow layout are part of the explanation.
 
 ## 3. Naming policy
 
@@ -104,7 +106,7 @@ Every major firmware interface must consider how the simulator observes it, sync
 
 ## 6. Current implementation state
 
-Integrated/accepted baseline:
+Integrated/accepted baseline through the current M00-06.03 checkpoint:
 
 - `M00-00`: RV64 QEMU virt reset entry, hart filtering, `gp`, stack, BSS, UART.
 - `M00-01`: minimal fatal M-mode trap using `mtvec`, `mcause`, `mepc`, and `mtval`.
@@ -115,18 +117,19 @@ Integrated/accepted baseline:
 - `M00-05`: per-hart state, private stacks, dense HartIndex, boot rendezvous, FDT population discovery, per-hart timer state/compare, and SMP acceptance for 1/2/4 harts with controlled over-capacity rejection.
 - `M00-06.01`: trusted M trap entry; lower-privilege x2/sp is never treated as trusted stack storage before switching domains.
 - `M00-06.02`: dedicated per-hart runtime M trap stacks for M/S/U-origin traps plus the first controlled M->S supervisor entry with its own S stack, `satp=0`, explicit no-delegation policy, and a permissive unlocked PMP probe entry.
-- developer workflow helpers: `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, and `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+- `M00-06.03`: first controlled S->M->S ECALL round trip with S-context markers, M-side origin/context validation, trusted TrapFrame ownership checks, common restore, and S-side restored-context validation.
+- developer workflow helpers: `scripts/setup-dev-env.sh`, `scripts/jixia.sh`, `scripts/pre-commit-check.sh`, `scripts/check-format.sh`, `.clang-format`, and `docs/JIXIA_DEVELOPER_WORKFLOW.md` / `docs/JIXIA_CODE_STYLE.md`.
 - AI-era RAS architecture/research records under `docs/`.
 
-M00-06.02 acceptance evidence: GitHub Actions run `31567837192`; all prior regressions and the dedicated supervisor-transition test passed.
+M00-06.03 acceptance evidence: GitHub Actions run `31582257350`; formatting, build, prior regressions, M00-06.02, and the dedicated M00-06.03 supervisor ECALL round trip all passed.
 
 Current queue:
 
 ```text
-ACTIVE  M00-06.03 S->M ECALL round trip
-NEXT    M00-06.04 hostile lower-privilege stack / M00-06 closure
+ACTIVE  M00-06.04 hostile lower-privilege stack / M00-06 closure
 NEXT    M00-07 Early physical allocator
 NEXT    M00-08 Structured event and trace ABI
+NEXT    M00-09 Automated QEMU test harness
 ```
 
 ### M00-05 accepted invariants
@@ -143,7 +146,7 @@ NEXT    M00-08 Structured event and trace ABI
 
 Design record: `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
 
-### M00-06 accepted stack/trust model
+### M00-06 accepted stack/trust model through M00-06.03
 
 RISC-V does not bank x2/sp by privilege level. Jixia therefore treats stack ownership as software state rather than a hardware property.
 
@@ -163,13 +166,25 @@ S stack
     supervisor payload
 ```
 
-Once `mscratch -> HartLocal` exists, runtime trap entry preserves interrupted x2/sp as a value, switches to `HartLocal.trap_stack_top`, constructs the TrapFrame there, and retains `mstatus.MPP` only for origin/return semantics rather than stack selection.
+Once `mscratch -> HartLocal` exists, runtime trap entry preserves interrupted x2/sp as a value, switches to `HartLocal.trap_stack_top`, constructs the TrapFrame there, and retains `mstatus.MPP` for origin/return semantics rather than stack selection.
 
 M00-06.02 intentionally uses a permissive, unlocked PMP entry only so the S-mode transition probe can execute/use RAM/UART. It does **not** claim PMP-backed isolation; service isolation remains later work.
 
-M00-06.03 now adds the first S-mode `ecall` back to M and must prove `mcause=9`, `MPP=S`, saved S stack/register state, `mepc`, and trusted TrapFrame storage.
+M00-06.03 proves the first controlled S-mode ECALL back to M and return to S. The probe handler is compiled only for the M00-06.03 build and validates:
 
-Do not mix the current privilege proof with paging, allocator, scheduler, service IPC, or real PMP isolation.
+```text
+mcause == 9
+mstatus.MPP == S
+mepc == expected ECALL site
+saved S x2/sp lies in the S probe stack
+saved S gp/a0/a7 equal known markers
+TrapFrame is aligned and entirely in current HartLocal's trusted M trap stack
+trap_active == 1
+```
+
+Only after validation does the handler advance saved `mepc` by the 32-bit ECALL length. The common trap restore returns to S, where the probe verifies restored `sp/gp/a0/a7` before printing PASS.
+
+Do not mix the current privilege proof with paging, allocator, scheduler, service IPC, a general syscall ABI, or real PMP isolation.
 
 ## 7. Console / observability boundary
 
@@ -232,7 +247,16 @@ bash scripts/jixia.sh run --smp 4
 bash scripts/jixia.sh debug --smp 4
 ```
 
-Detailed workflow: `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
+Before committing C/C++ changes:
+
+```bash
+git add <files>
+bash scripts/pre-commit-check.sh
+```
+
+The pre-commit gate runs staged whitespace checks and changed-line clang-format validation. GitHub Actions repeats patch hygiene and formatting checks against the `main` merge-base before building and running the regression/acceptance chain.
+
+Detailed workflow: `docs/JIXIA_DEVELOPER_WORKFLOW.md`. Formatting policy: `docs/JIXIA_CODE_STYLE.md`.
 
 Milestone acceptance scripts remain the source of truth for pass/fail; generic `jixia.sh run` does not replace machine-checkable gates.
 
