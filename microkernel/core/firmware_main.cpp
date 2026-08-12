@@ -12,9 +12,7 @@ extern "C" void jixia_recoverable_trap_test();
 extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
-extern "C" [[noreturn]] void
-jixia_m00_06_03_enter_supervisor_ecall();
-
+extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 
 namespace jixia::microkernel {
 namespace {
