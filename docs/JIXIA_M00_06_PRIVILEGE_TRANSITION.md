@@ -3,7 +3,7 @@
 **Status:** ACTIVE  
 **Stable baseline:** `main`  
 **Umbrella branch:** `milestone/m00-06-privilege-transition`  
-**Accepted through:** `M00-06.02 First M->S transition`
+**Accepted through:** `M00-06.03 S->M ECALL round trip`
 
 ## 1. Objective
 
@@ -22,7 +22,7 @@ M-mode Mozi
     -> ecall / controlled trap
     -> M-mode trusted trap entry
     -> prove previous privilege and saved context
-    -> controlled return or M-mode continuation
+    -> controlled return to S
 ```
 
 The architectural boundary is not merely the `mret` instruction. The critical security invariant is that M-mode must not trust an interrupted stack merely because the hart has already entered M privilege.
@@ -113,60 +113,97 @@ Accepted invariants:
 [x] CI includes a machine-checkable M00-06.02 transition test
 ```
 
-Acceptance commands:
+Acceptance command:
 
 ```bash
-bash scripts/test-trap-frame.sh
-bash scripts/test-recoverable-trap.sh
-bash scripts/test-timer-interrupt.sh
-bash scripts/test-kernel-print.sh
-bash scripts/test-m00-05-population.sh
 bash scripts/test-m00-06-02-supervisor-transition.sh
 ```
 
 Accepted CI evidence:
 
 ```text
-GitHub Actions run 31567837192
+GitHub Actions run 31568251600
 RV64 QEMU regression: PASS
-TrapFrame regression: PASS
-Recoverable trap regression: PASS
-Machine timer regression: PASS
-Kernel print regression: PASS
-M00-05 SMP population regression: PASS
 M00-06.02 supervisor transition: PASS
 ```
 
 The first supervisor probe initially trapped immediately after `mret` with an instruction-access fault. That result showed two useful facts at once: the lower-origin trap was safely captured on the new trusted M trap stack, and bare `satp=0` alone did not make the S probe executable on the QEMU CPU while PMP was present. M00-06.02 therefore installs a deliberately permissive, unlocked PMP NAPOT entry before `mret`. This entry is only bootstrap permission for the transition experiment; it is not a service-isolation policy.
 
-### M00-06.03 — S->M ECALL round trip — NEXT
+### M00-06.03 — S->M ECALL round trip — DONE
 
-Branch: `milestone/m00-06-03-supervisor-ecall-return`.
+Development branch: `milestone/m00-06-03-supervisor-ecall-return`.
 
-Goal:
+Accepted state transition:
 
 ```text
-S payload
+M-mode probe arm
+    -> MPP = S, mepc = supervisor ECALL payload
+    -> mret
+    -> S entry installs S stack
+    -> emit M00_06_03_SUPERVISOR_ENTRY
+    -> install known gp/a0/a7 markers
     -> ecall
-    -> M trap entry on trusted storage
-    -> jixia_trap_dispatch(TrapFrame*)
+    -> M trap entry saves interrupted S context as values
+    -> switch to per-hart trusted M trap stack
+    -> construct TrapFrame
     -> validate S-origin state
-    -> controlled return to S or controlled M continuation
+    -> advance saved mepc by the 32-bit ECALL length
+    -> common trap restore
+    -> mret
+    -> resume at instruction after ECALL in S-mode
+    -> validate restored sp/gp/a0/a7
+    -> emit M00_06_03_SUPERVISOR_ECALL_RETURN
 ```
 
-Machine-checkable proof must validate at least:
+The M00-06.03 handler is compiled only for the dedicated probe build. Ordinary firmware does not silently treat arbitrary S-mode ECALLs as successful syscalls.
+
+Accepted M-side invariants:
 
 ```text
-mcause == environment call from S-mode (9)
-mstatus.MPP == S
-saved x2/sp lies in the S stack range
-saved gp is the S payload value, not the firmware gp
-selected a0/a7 marker values survive entry
-TrapFrame address lies in trusted M-mode storage
-mepc matches the expected S-mode ECALL site
+[x] mcause == environment call from S-mode (9)
+[x] mstatus.MPP == S
+[x] mepc == jixia_m00_06_03_ecall_site
+[x] saved x2/sp lies in the S probe stack range
+[x] saved gp equals the S marker rather than firmware gp
+[x] saved a0/a7 equal the S marker values
+[x] TrapFrame is aligned to TRAP_FRAME_ALIGNMENT
+[x] the complete TrapFrame lies inside current HartLocal.trap_stack_bottom..trap_stack_top
+[x] HartLocal.trap_active == 1 while the handler owns the trap stack
+[x] saved mepc is modified only after every validation succeeds
 ```
 
-### M00-06.04 — Hostile lower-privilege stack and full acceptance — PLANNED
+Accepted S-side restore invariants:
+
+```text
+[x] mret resumes at jixia_m00_06_03_after_ecall
+[x] restored x2/sp equals the original S probe stack top
+[x] restored gp equals the S gp marker
+[x] restored a0 equals the S a0 marker
+[x] restored a7 equals the S a7 marker
+[x] firmware gp is explicitly re-established before calling normal C ABI code
+[x] address materialization before gp validation is protected from gp relaxation
+```
+
+Shared marker values live in `microkernel/arch/riscv/privilege_transition_test_values.h` so assembly and C++ consume one test contract.
+
+Acceptance command:
+
+```bash
+bash scripts/test-m00-06-03-supervisor-transition.sh
+```
+
+Machine-checkable markers:
+
+```text
+M00_06_03_ECALL_ARMED: PASS
+M00_06_03_SUPERVISOR_ENTRY: PASS
+M00_06_03_SUPERVISOR_ECALL_RETURN: PASS
+M00-06.03 supervisor ECALL round trip: PASS
+```
+
+The acceptance script also requires the completed SMP, Kernel Print, recoverable-trap, and machine-timer regressions and rejects fatal-trap or explicit M00-06.03 FAIL output before accepting the round trip.
+
+### M00-06.04 — Hostile lower-privilege stack and full acceptance — NEXT
 
 Branch: `milestone/m00-06-04-privilege-boundary-acceptance`.
 
@@ -224,7 +261,7 @@ The historical M00-06.01 branch distinguished M-origin and lower-origin stack pa
 
 ## 4. First-transition policy
 
-For the accepted first proof:
+For the accepted M00-06.02/M00-06.03 probes:
 
 ```text
 satp      = 0
@@ -240,7 +277,7 @@ This keeps the experiment focused on privilege transition rather than paging, de
 
 The permissive PMP entry is necessary only to grant the S probe access to the firmware RAM/S stack/QEMU UART address space in this experiment. It deliberately does not claim protection between M and S. PMP-backed service ownership and isolation remain later work.
 
-The S-mode marker uses direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. That access is test observability, not a supervisor console ABI.
+The S-mode markers use direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. That access is test observability, not a supervisor console ABI.
 
 Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscratch` path and are not part of the current M-mode trap entry.
 
@@ -248,7 +285,7 @@ Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscra
 
 The transition must not create an M-mode interval in which firmware executes ordinary stack-using code on lower-privilege storage.
 
-M00-06.02 sequence:
+M00-06.03 sequence:
 
 ```text
 normal M-mode C++
@@ -263,9 +300,17 @@ S entry
     inherited x2 exists only for the first register-only instructions
     immediately x2 -> dedicated S probe stack
     then calls/stack use are permitted
-```
 
-If a trap arrives after `mret`, the runtime M trap entry ignores stack ownership implied by the current x2 value: it saves that value and switches to the per-hart M trap stack before constructing privileged state.
+S ECALL
+    hardware enters M but leaves x2 holding the S value
+    trap entry saves x2 as a value without dereferencing it
+    x2 -> dedicated per-hart M trap stack
+    TrapFrame is constructed only on trusted M storage
+
+M return
+    common restore writes the saved S x2 value back last
+    mret returns to S after the ECALL
+```
 
 ## 6. Nested-trap policy
 

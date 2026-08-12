@@ -12,7 +12,7 @@ extern "C" void jixia_recoverable_trap_test();
 extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
-
+extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 
 namespace jixia::microkernel {
 namespace {
@@ -175,6 +175,22 @@ void boot_main(
         "M00_06_02_TRANSITION_ARMED: PASS\n");
 
     jixia_m00_06_02_enter_supervisor();
+#elif defined(JIXIA_M00_06_03_PROBE)
+    /*
+     * The dedicated M00-06.03 build proves S -> M -> S through an ECALL.
+     * The actual S-entry marker is emitted only after mret and after the S
+     * probe has installed its own stack.
+     */
+    printk("\n"
+           "[Jixia][M00-06.03][PrivilegeTransition]\n"
+           "satp        : bare (0)\n"
+           "medeleg     : 0\n"
+           "mideleg     : 0\n"
+           "pmp0        : permissive RWX NAPOT (probe only)\n"
+           "async M irq : disabled\n"
+           "M00_06_03_ECALL_ARMED: PASS\n");
+
+    jixia_m00_06_03_enter_supervisor_ecall();
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();

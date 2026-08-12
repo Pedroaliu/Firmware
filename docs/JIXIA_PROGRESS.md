@@ -5,9 +5,9 @@
 - **Last updated:** 2026-08-12
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-06-03-supervisor-ecall-return`
+- **Current progress branch:** `milestone/m00-06-04-privilege-boundary-acceptance`
 - **Current milestone:** `M00-06 Privilege transition foundation`
-- **Current status:** ACTIVE — M00-06.02 M->S transition accepted; next prove the S->M ECALL round trip and saved lower-privilege context
+- **Current status:** ACTIVE — M00-06.03 S->M->S ECALL round trip accepted; next prove hostile lower-privilege stack handling and close M00-06
 - **Previous milestone:** `M00-05 Per-hart state, stacks, and SMP foundation` — DONE and integrated into `main`
 
 ## Status legend
@@ -33,7 +33,7 @@
 | F00-01 Kernel print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, append-only KernelLogBuffer, temporary UART mirror, `printk` |
 | Console/timer integration | DONE | PR #8; `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | timer and console foundations coexist without regression |
 | M00-05 Per-hart state, stacks, SMP foundation | DONE | `bash scripts/test-m00-05-population.sh`; user-confirmed 2026-08-11; `docs/JIXIA_M00_05_SMP_FOUNDATION.md` | private stacks, HartLocal/mscratch, explicit publication, FDT population, per-hart timers, 1/2/4-hart acceptance, controlled 5-hart rejection |
-| M00-06 Privilege transition foundation | ACTIVE | `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`; CI run `31567837192` | M00-06.01 trusted trap entry DONE; M00-06.02 M->S supervisor entry DONE; M00-06.03 ECALL round trip next |
+| M00-06 Privilege transition foundation | ACTIVE | `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`; CI run `31582257350` | M00-06.01 trusted trap entry DONE; M00-06.02 M->S supervisor entry DONE; M00-06.03 S->M->S ECALL round trip DONE; M00-06.04 boundary acceptance active |
 | M00-07 Early physical allocator | NEXT | pending | supports later service/memory work |
 | M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
 | M00-09 Automated QEMU test harness | PLANNED | `scripts/jixia.sh`; milestone scripts remain authoritative | consolidate machine-checkable regression tests later |
@@ -209,9 +209,9 @@ M-mode Mozi
     -> controlled return or termination
 ```
 
-### Accepted through M00-06.02
+### Accepted through M00-06.03
 
-M00-06.01 established the lower-privilege trust boundary. M00-06.02 then made runtime trap-stack ownership uniform and proved the first one-way M->S transition.
+M00-06.01 established the lower-privilege trust boundary. M00-06.02 made runtime trap-stack ownership uniform and proved the first one-way M->S transition. M00-06.03 closed the first controlled S->M->S ECALL round trip.
 
 Accepted runtime stack ownership:
 
@@ -225,46 +225,47 @@ trusted M trap stack
     all runtime M-level traps: M->M, S->M, U->M
 
 S probe stack
-    first supervisor payload
+    supervisor payload
 ```
 
-Runtime trap entry now saves interrupted x2/sp as a value, rejects unsupported nested traps, switches to the per-hart trusted trap stack, constructs the TrapFrame there, dispatches, restores the interrupted x2, and returns with `mret`.
+Runtime trap entry saves interrupted x2/sp as a value, rejects unsupported nested traps, switches to the per-hart trusted trap stack, constructs the TrapFrame there, dispatches, restores the interrupted x2, and returns with `mret`.
 
-The first S transition uses:
+The M00-06.03 S-mode ECALL proof validates before mutating the saved return context:
 
 ```text
-satp      = 0
-medeleg   = 0
-mideleg   = 0
-MIE/mie   = 0
-PMP entry = permissive RWX NAPOT, unlocked, probe only
+mcause == 9
+mstatus.MPP == S
+mepc == expected ECALL site
+saved sp belongs to S probe stack
+saved gp/a0/a7 match known S markers
+TrapFrame is aligned and entirely inside current hart's trusted M trap stack
+trap_active == 1
 ```
 
-The temporary PMP entry is permission for the transition experiment, not a service-isolation design.
+Only after all validation passes does the probe handler advance saved `mepc` by four bytes. Common restore then returns to S, where the payload verifies restored `sp/gp/a0/a7` before printing PASS. The ECALL handler is compile-time scoped to the M00-06.03 probe and is not a general syscall ABI.
 
 Machine-checkable result:
 
 ```text
-M00_06_02_TRANSITION_ARMED: PASS
-M00_06_02_SUPERVISOR_ENTRY: PASS
-M00-06.02 supervisor transition: PASS
+M00_06_03_ECALL_ARMED: PASS
+M00_06_03_SUPERVISOR_ENTRY: PASS
+M00_06_03_SUPERVISOR_ECALL_RETURN: PASS
+M00-06.03 supervisor ECALL round trip: PASS
 ```
 
-CI evidence: GitHub Actions run `31567837192`.
+CI evidence: GitHub Actions run `31582257350` passed formatting, build, all prior regressions, M00-06.02, and the M00-06.03 round trip.
 
-### ACTIVE submilestone — M00-06.03 S->M ECALL round trip
+### ACTIVE submilestone — M00-06.04 hostile lower-privilege stack / boundary acceptance
 
 Next proof:
 
 ```text
-S payload
-    -> load known S-mode register markers
-    -> ecall
-    -> M trap entry on trusted per-hart trap stack
-    -> validate mcause == 9
-    -> validate mstatus.MPP == S
-    -> validate saved S x2/gp/a0/a7 and mepc
-    -> return to S or a controlled M continuation
+hostile/invalid S sp
+    -> trap entry must never use it as privileged storage
+    -> trusted HartLocal anchor selects the M trap stack
+    -> unexpected privilege/anchor states fail closed
+    -> old M/S transition regressions remain green
+    -> close M00-06 only after hostile-path evidence is machine-checkable
 ```
 
 The M00-06 design and acceptance contract is recorded in `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`.
@@ -286,11 +287,10 @@ nested M-level trap support
 
 ## NEXT queue
 
-1. finish `M00-06.03 S->M ECALL round trip`
-2. finish `M00-06.04 hostile lower-privilege stack and M00-06 closure`
-3. `M00-07 Early physical allocator`
-4. `M00-08 Structured event and trace ABI`
-5. `M00-09 Automated QEMU test harness`
+1. finish `M00-06.04 hostile lower-privilege stack and M00-06 closure`
+2. `M00-07 Early physical allocator`
+3. `M00-08 Structured event and trace ABI`
+4. `M00-09 Automated QEMU test harness`
 
 Only one architectural milestone is ACTIVE at a time.
 
@@ -334,6 +334,18 @@ Do not build a long chain of completed milestone branches while leaving `main` s
 
 ## Progress history
 
+### 2026-08-12 — M00-06.03 accepted
+
+- Added a dedicated M00-06.03 probe build without changing the default firmware ECALL policy.
+- Entered S-mode on the supervisor probe stack, emitted an S-only entry marker, loaded known `gp/a0/a7` markers, and executed ECALL.
+- Proved `mcause=9`, `mstatus.MPP=S`, expected ECALL `mepc`, saved S stack/register context, trusted M TrapFrame ownership/alignment, and `trap_active=1`.
+- Advanced saved `mepc` only after validation and returned through the common restore + `mret` path.
+- S-mode verified restored `sp/gp/a0/a7` before emitting the round-trip PASS marker.
+- Added shared assembly/C++ test markers to prevent probe-contract drift.
+- Added `.clang-format`, changed-line formatting checks, staged pre-commit checks, CI enforcement, and code-style documentation.
+- GitHub Actions run `31582257350` passed the complete regression chain including M00-06.02 and M00-06.03.
+- Next submilestone: M00-06.04 hostile lower-privilege stack and full boundary acceptance.
+
 ### 2026-08-12 — M00-06.02 accepted
 
 - Added a dedicated trusted runtime M trap stack for every hart.
@@ -344,7 +356,7 @@ Do not build a long chain of completed milestone branches while leaving `main` s
 - Added the first controlled one-way M->S transition with `satp=0`, no delegation, and interrupts disabled.
 - The first CI attempt exposed an S-mode instruction-access fault; the trusted M trap path safely captured it.
 - Added a permissive, unlocked PMP probe entry so S-mode can execute/use its stack/UART without claiming isolation.
-- GitHub Actions run `31567837192` passed all old regressions plus `M00-06.02 supervisor transition`.
+- GitHub Actions run `31568251600` passed all old regressions plus `M00-06.02 supervisor transition`.
 - Next submilestone: M00-06.03 S->M ECALL round trip.
 
 ### 2026-08-11 — M00-06 activated
