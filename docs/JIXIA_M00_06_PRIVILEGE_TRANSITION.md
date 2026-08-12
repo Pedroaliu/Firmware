@@ -25,7 +25,7 @@ M-mode Mozi
     -> controlled return or M-mode continuation
 ```
 
-The architectural boundary is not merely the `mret` instruction. The critical security invariant is that M-mode must not trust lower-privilege stack storage when a trap arrives from S-mode.
+The architectural boundary is not merely the `mret` instruction. The critical security invariant is that M-mode must not trust an interrupted stack merely because the hart has already entered M privilege.
 
 ## 2. Submilestone gates
 
@@ -41,7 +41,7 @@ Delivered mechanisms:
 [x] explicit early mscratch = 0 state before HartLocal exists
 [x] HartLocal assembly ABI for trap-entry scratch state
 [x] privilege-aware trap entry using mstatus.MPP
-[x] M-origin traps continue to use the current trusted M stack
+[x] M-origin traps preserved through the existing TrapFrame ABI
 [x] lower-origin traps do not dereference the interrupted sp before switching trust domains
 [x] lower-origin x2/sp value is preserved in the TrapFrame
 [x] lower-origin gp is preserved and kernel gp is restored before C++ dispatch
@@ -50,40 +50,79 @@ Delivered mechanisms:
 [x] clean CI baseline builds and passes RV64 QEMU regression
 ```
 
-Known limitation carried into M00-06.02:
+M00-06.01 used the normal per-hart M stack for M-origin traps and the per-hart stack top as temporary trusted storage for lower-origin traps. That was intentionally a minimum security boundary, not the final stack-ownership model.
 
-> The lower->M entry currently uses the per-hart stack top as trusted storage. Before executing real S-mode code, M00-06.02 must make trap-stack ownership explicit so a lower-origin TrapFrame cannot overwrite a live normal M-mode call stack.
-
-Nested/double traps remain unsupported during this milestone.
-
-### M00-06.02 — First M->S transition with trusted trap-stack ownership — ACTIVE
+### M00-06.02 — First M->S transition with explicit trap-stack ownership — IMPLEMENTED, ACCEPTANCE PENDING
 
 Branch: `milestone/m00-06-02-supervisor-transition`.
+
+M00-06.02 chooses a dedicated per-hart runtime M trap stack rather than a reserved region inside the normal M stack.
+
+Selected runtime layout:
+
+```text
+per hart
+
+normal M stack
+    ordinary M-mode C/C++ execution
+
+trusted M trap stack
+    every runtime trap handled by M-mode
+    M -> M
+    S -> M
+    U -> M
+
+S probe stack
+    first controlled supervisor payload
+```
+
+There is still only one architectural x2/sp register per hart. The three stack names describe software-owned memory regions. Trap entry saves the interrupted x2 value, then loads the trusted trap-stack address into x2.
 
 Goal:
 
 ```text
 M mode
-  -> establish non-overlapping trusted trap-stack region
-  -> disable/define delegation for the experiment
+  -> establish non-overlapping trusted per-hart trap stack
+  -> keep normal M call stack intact
+  -> disable delegation/asynchronous noise for the experiment
   -> satp = 0
   -> set MPP = S and mepc = S entry
   -> mret
-  -> prove execution reached S mode
+  -> S entry immediately establishes its own S stack
+  -> emit machine-checkable S-entry marker
+  -> park in S mode
 ```
 
-Required invariants:
+Implemented invariants:
 
 ```text
-[ ] a live M-mode call stack cannot be overwritten by a lower-origin TrapFrame
-[ ] M-mode never dereferences an untrusted S-mode sp during trap entry
-[ ] the S entry establishes its own S stack as its first stack-owning action
-[ ] medeleg/mideleg policy is explicit for the experiment
-[ ] asynchronous noise is disabled or deliberately controlled
-[ ] existing M-origin trap behavior is unchanged
+[x] a live normal M-mode call stack is not used as runtime TrapFrame storage
+[x] every runtime M-level trap uses a dedicated per-hart trusted trap stack
+[x] trap entry saves interrupted x2/sp as a value before switching stacks
+[x] M-mode never dereferences interrupted S/U stack storage during trap entry
+[x] M-origin TrapFrame/recoverable/timer semantics are preserved after moving frame storage
+[x] TrapFrame regression verifies the frame lies inside the current hart's trap stack
+[x] nested/double runtime traps fail closed instead of overwriting the active TrapFrame
+[x] the S entry establishes its own S stack before any call or stack-using operation
+[x] medeleg = 0 and mideleg = 0 for the first transition probe
+[x] satp = 0 for the first transition probe
+[x] asynchronous M interrupts are disabled for the transition probe
+[x] dedicated probe build emits M00_06_02_TRANSITION_ARMED and M00_06_02_SUPERVISOR_ENTRY markers
+[x] CI includes a machine-checkable M00-06.02 transition test
 ```
 
-The preferred first layout is either a dedicated per-hart trap stack or an explicitly reserved non-overlapping trap region. The choice must be documented before the first `mret` to S-mode.
+Acceptance commands:
+
+```bash
+bash scripts/test-trap-frame.sh
+bash scripts/test-recoverable-trap.sh
+bash scripts/test-timer-interrupt.sh
+bash scripts/test-kernel-print.sh
+bash scripts/test-m00-05-population.sh
+bash scripts/test-m00-06-02-supervisor-transition.sh
+```
+
+M00-06.02 becomes DONE only after the default regression build and the dedicated supervisor probe both pass on CI/local QEMU.
 
 ### M00-06.03 — S->M ECALL round trip — NEXT
 
@@ -132,31 +171,41 @@ Required evidence:
 
 M00-06 is DONE only after M00-06.04 passes and the umbrella milestone is closed in `docs/JIXIA_PROGRESS.md`.
 
-## 3. Trap-entry trust model
+## 3. Trap-entry trust and stack model
 
-Two questions are independent on every M-mode trap entry:
+Two questions remain independent on every M-level trap entry:
 
 ```text
 1. Is a HartLocal anchor installed in mscratch?
-2. What was the previous privilege recorded in mstatus.MPP?
+2. What previous privilege is recorded in mstatus.MPP?
 ```
 
-The intended policy is:
+However, M00-06.02 deliberately removes previous privilege from runtime stack selection. Once HartLocal exists, every runtime M-level trap uses the same trusted per-hart trap stack.
+
+Intended policy:
 
 ```text
-M-origin trap + trusted current M stack
-    -> save TrapFrame on current trusted stack
+runtime trap + HartLocal anchor
+    -> preserve interrupted t0/t1/x2 without dereferencing interrupted x2
+    -> reject nested trap if trap_active is already set
+    -> switch x2 to HartLocal.trap_stack_top
+    -> construct TrapFrame on trusted per-hart trap stack
+    -> save mstatus.MPP as part of TrapFrame
+    -> dispatch
+    -> clear trap_active
+    -> restore interrupted x2
+    -> mret
 
-S/U-origin trap + HartLocal anchor
-    -> preserve interrupted register values without trusting interrupted sp
-    -> switch to trusted per-hart M trap storage
-    -> build TrapFrame there
+early M-origin trap + no HartLocal anchor
+    -> bootstrap-only current-M-stack path
 
 S/U-origin trap + no HartLocal anchor
-    -> fail closed without storing through untrusted sp
+    -> fail closed using registers only
 ```
 
-`mscratch -> HartLocal` is a per-hart anchor, not the trap stack itself.
+`mscratch -> HartLocal` is the trusted per-hart anchor, not the stack itself.
+
+The historical M00-06.01 branch distinguished M-origin and lower-origin stack paths. M00-06.02 intentionally unifies runtime trap storage while retaining MPP for semantic origin/return decisions.
 
 ## 4. First-transition policy
 
@@ -166,30 +215,53 @@ For the first proof:
 satp    = 0
 medeleg = 0
 mideleg = 0
+MIE     = 0
+mie     = 0
 ```
 
-unless the implementation record explicitly documents a narrower controlled policy. This keeps the experiment focused on privilege transition rather than paging or delegated supervisor trap handling.
+This keeps the experiment focused on privilege transition rather than paging, delegation, or asynchronous interaction.
+
+The S-mode marker currently uses direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. Because M00-06.02 has no PMP isolation and uses bare translation, that access is intentionally possible. It is test observability, not a supervisor console ABI.
 
 Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscratch` path and are not part of the current M-mode trap entry.
 
 ## 5. Stack ownership rule
 
-The transition must not create an M-mode interval in which firmware code is executing ordinary stack-using code on a lower-privilege stack.
+The transition must not create an M-mode interval in which firmware executes ordinary stack-using code on lower-privilege storage.
 
-Preferred sequence:
+M00-06.02 sequence:
 
 ```text
-M-mode trampoline still owns trusted M stack
-    -> prepare mstatus/mepc
-    -> mret
-S-mode entry
-    -> establish S stack immediately
-    -> execute payload
+normal M-mode C++
+    x2 -> normal per-hart M stack
+
+M transition trampoline
+    still x2 -> normal M stack
+    configure satp/delegation/mstatus/mepc
+    mret
+
+S entry
+    inherited x2 exists only for the first register-only instructions
+    immediately x2 -> dedicated S probe stack
+    then calls/stack use are permitted
 ```
 
-If a trap arrives immediately after `mret` and before S establishes its stack, `mstatus.MPP=S` still forces the lower-origin trusted-entry path; M-mode must not trust the inherited `sp` value.
+If a trap arrives after `mret`, the runtime M trap entry ignores stack ownership implied by the current x2 value: it saves that value and switches to the per-hart M trap stack before constructing privileged state.
 
-## 6. Integration policy
+## 6. Nested-trap policy
+
+M00-06 does not support nested M-level traps.
+
+Each HartLocal has a `trap_active` state:
+
+```text
+0 -> runtime trap may claim the per-hart trap stack
+1 -> another trap would overwrite active trap state, so fail closed
+```
+
+This is deliberately stronger than silently resetting x2 to the trap-stack top and overwriting an outer TrapFrame. A later milestone may introduce a real trap-depth/stacking policy if required.
+
+## 7. Integration policy
 
 M00-06 is one architectural milestone with multiple accepted checkpoints.
 
@@ -213,7 +285,7 @@ main
 
 Development branches may contain fine-grained commits. `main` keeps stable semantic checkpoints rather than debug/fixup history.
 
-## 7. Explicit non-goals
+## 8. Explicit non-goals
 
 M00-06 does not add:
 
