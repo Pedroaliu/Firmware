@@ -50,6 +50,7 @@ Required tools:
   cmake >= 3.20
   ninja
   python3
+  clang-format
   timeout
   qemu-system-riscv64
   riscv64-unknown-elf-gcc / g++
@@ -164,6 +165,7 @@ check_tools()
     add_missing cmake cmake
     add_missing ninja ninja-build
     add_missing python3 python3
+    add_missing clang-format clang-format
     add_missing timeout coreutils
 
     # Debian-family qemu-system-riscv64 is normally provided by
@@ -206,6 +208,7 @@ print_detected_versions()
 
     have cmake && cmake --version | head -n1 || true
     have ninja && ninja --version | sed 's/^/ninja /' || true
+    have clang-format && clang-format --version | head -n1 || true
     have qemu-system-riscv64 && qemu-system-riscv64 --version | head -n1 || true
     have riscv64-unknown-elf-gcc && riscv64-unknown-elf-gcc --version | head -n1 || true
     have riscv64-unknown-elf-g++ && riscv64-unknown-elf-g++ --version | head -n1 || true
