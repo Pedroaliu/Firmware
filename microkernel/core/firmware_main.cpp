@@ -170,6 +170,7 @@ void boot_main(
         "satp        : bare (0)\n"
         "medeleg     : 0\n"
         "mideleg     : 0\n"
+        "pmp0        : permissive RWX NAPOT (probe only)\n"
         "async M irq : disabled\n"
         "M00_06_02_TRANSITION_ARMED: PASS\n");
 
