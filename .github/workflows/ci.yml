@@ -40,7 +40,7 @@ jobs:
         run: |
           bash scripts/setup-dev-env.sh --yes --without-gdb
 
-      - name: Check changed C/C++ formatting
+      - name: Check patch hygiene and C/C++ formatting
         shell: bash
         run: |
           if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
@@ -50,6 +50,7 @@ jobs:
             FORMAT_BASE="$(git merge-base HEAD origin/main)"
           fi
           echo "format base: ${FORMAT_BASE}"
+          git diff --check "${FORMAT_BASE}" HEAD
           bash scripts/check-format.sh --base "${FORMAT_BASE}"
 
       - name: Show resolved toolchain
