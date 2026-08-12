@@ -1,3 +1,8 @@
+//
+// Created by pedroa on 2026/8/10.
+//
+
+
 #pragma once
 
 #include <stdint.h>
@@ -14,5 +19,11 @@ inline constexpr uintptr_t kBootStackSize =
 
 inline constexpr uintptr_t kBootStackAlignment =
     HART_BOOT_STACK_ALIGNMENT;
+
+inline constexpr uintptr_t kTrapStackSize =
+    HART_TRAP_STACK_SIZE;
+
+inline constexpr uintptr_t kTrapStackAlignment =
+    HART_TRAP_STACK_ALIGNMENT;
 
 } // namespace jixia::microkernel::hart
