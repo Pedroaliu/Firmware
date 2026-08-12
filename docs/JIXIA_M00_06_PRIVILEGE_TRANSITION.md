@@ -3,7 +3,7 @@
 **Status:** ACTIVE  
 **Stable baseline:** `main`  
 **Umbrella branch:** `milestone/m00-06-privilege-transition`  
-**Current submilestone branch:** `milestone/m00-06-02-supervisor-transition`
+**Accepted through:** `M00-06.02 First M->S transition`
 
 ## 1. Objective
 
@@ -52,9 +52,9 @@ Delivered mechanisms:
 
 M00-06.01 used the normal per-hart M stack for M-origin traps and the per-hart stack top as temporary trusted storage for lower-origin traps. That was intentionally a minimum security boundary, not the final stack-ownership model.
 
-### M00-06.02 — First M->S transition with explicit trap-stack ownership — IMPLEMENTED, ACCEPTANCE PENDING
+### M00-06.02 — First M->S transition with explicit trap-stack ownership — DONE
 
-Branch: `milestone/m00-06-02-supervisor-transition`.
+Development branch: `milestone/m00-06-02-supervisor-transition`.
 
 M00-06.02 chooses a dedicated per-hart runtime M trap stack rather than a reserved region inside the normal M stack.
 
@@ -78,7 +78,7 @@ S probe stack
 
 There is still only one architectural x2/sp register per hart. The three stack names describe software-owned memory regions. Trap entry saves the interrupted x2 value, then loads the trusted trap-stack address into x2.
 
-Goal:
+Accepted state transition:
 
 ```text
 M mode
@@ -86,6 +86,7 @@ M mode
   -> keep normal M call stack intact
   -> disable delegation/asynchronous noise for the experiment
   -> satp = 0
+  -> install a permissive, unlocked PMP entry for probe execution
   -> set MPP = S and mepc = S entry
   -> mret
   -> S entry immediately establishes its own S stack
@@ -93,7 +94,7 @@ M mode
   -> park in S mode
 ```
 
-Implemented invariants:
+Accepted invariants:
 
 ```text
 [x] a live normal M-mode call stack is not used as runtime TrapFrame storage
@@ -107,6 +108,7 @@ Implemented invariants:
 [x] medeleg = 0 and mideleg = 0 for the first transition probe
 [x] satp = 0 for the first transition probe
 [x] asynchronous M interrupts are disabled for the transition probe
+[x] temporary PMP entry permits the S probe to execute/use RAM/UART without claiming isolation
 [x] dedicated probe build emits M00_06_02_TRANSITION_ARMED and M00_06_02_SUPERVISOR_ENTRY markers
 [x] CI includes a machine-checkable M00-06.02 transition test
 ```
@@ -122,11 +124,24 @@ bash scripts/test-m00-05-population.sh
 bash scripts/test-m00-06-02-supervisor-transition.sh
 ```
 
-M00-06.02 becomes DONE only after the default regression build and the dedicated supervisor probe both pass on CI/local QEMU.
+Accepted CI evidence:
+
+```text
+GitHub Actions run 31567837192
+RV64 QEMU regression: PASS
+TrapFrame regression: PASS
+Recoverable trap regression: PASS
+Machine timer regression: PASS
+Kernel print regression: PASS
+M00-05 SMP population regression: PASS
+M00-06.02 supervisor transition: PASS
+```
+
+The first supervisor probe initially trapped immediately after `mret` with an instruction-access fault. That result showed two useful facts at once: the lower-origin trap was safely captured on the new trusted M trap stack, and bare `satp=0` alone did not make the S probe executable on the QEMU CPU while PMP was present. M00-06.02 therefore installs a deliberately permissive, unlocked PMP NAPOT entry before `mret`. This entry is only bootstrap permission for the transition experiment; it is not a service-isolation policy.
 
 ### M00-06.03 — S->M ECALL round trip — NEXT
 
-Planned branch name: `milestone/m00-06-03-supervisor-ecall-return`.
+Branch: `milestone/m00-06-03-supervisor-ecall-return`.
 
 Goal:
 
@@ -153,7 +168,7 @@ mepc matches the expected S-mode ECALL site
 
 ### M00-06.04 — Hostile lower-privilege stack and full acceptance — PLANNED
 
-Planned branch name: `milestone/m00-06-04-privilege-boundary-acceptance`.
+Branch: `milestone/m00-06-04-privilege-boundary-acceptance`.
 
 Goal: prove the privilege boundary fails closed rather than merely working on the normal path.
 
@@ -182,7 +197,7 @@ Two questions remain independent on every M-level trap entry:
 
 However, M00-06.02 deliberately removes previous privilege from runtime stack selection. Once HartLocal exists, every runtime M-level trap uses the same trusted per-hart trap stack.
 
-Intended policy:
+Accepted policy:
 
 ```text
 runtime trap + HartLocal anchor
@@ -209,19 +224,23 @@ The historical M00-06.01 branch distinguished M-origin and lower-origin stack pa
 
 ## 4. First-transition policy
 
-For the first proof:
+For the accepted first proof:
 
 ```text
-satp    = 0
-medeleg = 0
-mideleg = 0
-MIE     = 0
-mie     = 0
+satp      = 0
+medeleg   = 0
+mideleg   = 0
+MIE       = 0
+mie       = 0
+pmpaddr0  = maximal NAPOT encoding
+pmpcfg0   = RWX + NAPOT, unlocked (probe only)
 ```
 
-This keeps the experiment focused on privilege transition rather than paging, delegation, or asynchronous interaction.
+This keeps the experiment focused on privilege transition rather than paging, delegation, asynchronous interaction, or real PMP isolation.
 
-The S-mode marker currently uses direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. Because M00-06.02 has no PMP isolation and uses bare translation, that access is intentionally possible. It is test observability, not a supervisor console ABI.
+The permissive PMP entry is necessary only to grant the S probe access to the firmware RAM/S stack/QEMU UART address space in this experiment. It deliberately does not claim protection between M and S. PMP-backed service ownership and isolation remain later work.
+
+The S-mode marker uses direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. That access is test observability, not a supervisor console ABI.
 
 Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscratch` path and are not part of the current M-mode trap entry.
 
@@ -237,7 +256,7 @@ normal M-mode C++
 
 M transition trampoline
     still x2 -> normal M stack
-    configure satp/delegation/mstatus/mepc
+    configure PMP/satp/delegation/mstatus/mepc
     mret
 
 S entry
@@ -270,9 +289,7 @@ main
   |
   +-- accepted M00-06.01 checkpoint
   |
-  +-- M00-06.02 working branch
-  |       -> test/CI
-  |       -> squash accepted checkpoint into main
+  +-- accepted M00-06.02 checkpoint
   |
   +-- M00-06.03 branch from latest main
   |       -> test/CI
