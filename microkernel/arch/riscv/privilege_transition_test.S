@@ -50,6 +50,26 @@ jixia_m00_06_02_enter_supervisor:
     sfence.vma zero, zero
 
     /*
+     * Give S-mode a deliberately permissive PMP window for this proof only.
+     *
+     * QEMU's rv64 CPU implements PMP. When PMP entries exist but do not match,
+     * S/U accesses are not implicitly granted just because satp is bare. A
+     * maximal NAPOT entry with RWX permissions lets the probe execute from the
+     * firmware RAM image, use its S stack, and reach the QEMU UART MMIO.
+     *
+     * pmpcfg0[7:0] = 0x1f:
+     *   R=1, W=1, X=1, A=NAPOT(11b), L=0
+     *
+     * This is NOT an isolation policy. PMP-backed service isolation is a later
+     * milestone; M00-06.02 only isolates privilege-transition mechanics.
+     */
+    li t0, -1
+    csrw pmpaddr0, t0
+
+    li t0, 0x1f
+    csrw pmpcfg0, t0
+
+    /*
      * mstatus.MPP = S (01b).
      * Clear the two-bit field first, then set bit 11.
      */
@@ -83,9 +103,8 @@ jixia_m00_06_02_enter_supervisor:
     andi sp, sp, -16
 
     /*
-     * With satp=0 and no PMP isolation in this milestone, the QEMU UART is
-     * directly reachable from S-mode. This marker is observability for the
-     * transition proof, not a future supervisor console ABI.
+     * satp is bare and the temporary PMP entry permits this access. Direct
+     * UART use is observability for this milestone, not a supervisor ABI.
      */
     la a0, .Lsupervisor_entry_message
     call uart_puts
