@@ -15,6 +15,7 @@ extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
 extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
+extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe();
 
 namespace jixia::microkernel {
 namespace {
@@ -238,6 +239,13 @@ void boot_main(
            "M00_06_04_BOUNDARY_ARMED: PASS\n");
 
     jixia_m00_06_04_enter_supervisor_boundary();
+#elif defined(JIXIA_M00_07_03_PROBE)
+    /*
+     * M00-07.03 leaves one executable Extended page only in pflash, enables
+     * Sv39 for an S-mode probe, and lets the resident M-mode pager satisfy the
+     * resulting instruction page fault from contained EarlyMemory.
+     */
+    jixia_m00_07_03_run_pre_ddr_paging_probe();
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();
