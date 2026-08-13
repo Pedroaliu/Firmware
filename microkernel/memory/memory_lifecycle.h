@@ -13,8 +13,7 @@ namespace jixia::microkernel::memory {
  * boot SRAM, L2 CAR, or L3 backing-cache implementations behind the same
  * state machine.
  */
-enum class MemoryDomain : uint8_t
-{
+enum class MemoryDomain : uint8_t {
     uninitialized = 0,
     contained,
     transitioning,
@@ -27,8 +26,7 @@ enum class MemoryDomain : uint8_t
  * advance this state without collapsing discovery/training/layout/commit into
  * one opaque "ddr_init" bit.
  */
-enum class DdrState : uint8_t
-{
+enum class DdrState : uint8_t {
     offline = 0,
     discovered,
     training,
@@ -38,21 +36,18 @@ enum class DdrState : uint8_t
     online,
 };
 
-enum class BackingKind : uint8_t
-{
+enum class BackingKind : uint8_t {
     unavailable = 0,
     contained,
     ddr,
 };
 
-struct PhysicalRange
-{
+struct PhysicalRange {
     uintptr_t base;
     size_t size;
 };
 
-struct Snapshot
-{
+struct Snapshot {
     MemoryDomain domain;
     DdrState ddr;
     PhysicalRange contained;
