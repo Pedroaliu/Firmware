@@ -19,34 +19,28 @@ extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
 namespace jixia::microkernel {
 namespace {
 
-
-void initialize_memory_foundation()
-{
+void initialize_memory_foundation() {
     memory::initialize_contained();
     const memory::Snapshot state = memory::snapshot();
 
-    printk(
-        "\n"
-        "[Jixia][M00-07][Memory]\n"
-        "state       : %s\n"
-        "contained   : [%p, %p)\n"
-        "ddr         : %s\n"
-        "ddr alloc   : %s\n",
-        memory::domain_name(state.domain),
-        reinterpret_cast<void*>(state.contained.base),
-        reinterpret_cast<void*>(state.contained.base + state.contained.size),
-        memory::ddr_state_name(state.ddr),
-        state.ddr_allocation_enabled ? "enabled" : "disabled");
+    printk("\n"
+           "[Jixia][M00-07][Memory]\n"
+           "state       : %s\n"
+           "contained   : [%p, %p)\n"
+           "ddr         : %s\n"
+           "ddr alloc   : %s\n",
+           memory::domain_name(state.domain), reinterpret_cast<void*>(state.contained.base),
+           reinterpret_cast<void*>(state.contained.base + state.contained.size),
+           memory::ddr_state_name(state.ddr),
+           state.ddr_allocation_enabled ? "enabled" : "disabled");
 
-    if (!memory::validate_contained_invariants())
-    {
+    if (!memory::validate_contained_invariants()) {
         printk("M00_07_CONTAINED_MEMORY: FAIL\n");
         hart::park();
     }
 
     printk("M00_07_CONTAINED_MEMORY: PASS\n");
 }
-
 
 void print_hart_table(hart::HartIndex present_count)
 {
