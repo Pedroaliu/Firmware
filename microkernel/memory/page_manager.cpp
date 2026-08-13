@@ -1,0 +1,135 @@
+#include "microkernel/memory/page_manager.h"
+
+extern "C" char __early_page_pool_start[];
+extern "C" char __early_page_pool_end[];
+
+namespace jixia::microkernel::memory::page_manager {
+namespace {
+
+constexpr size_t kMaxRanges = 4U;
+
+struct ManagedRange {
+    uintptr_t base;
+    uintptr_t next;
+    uintptr_t end;
+    BackingKind backing;
+};
+
+ManagedRange g_ranges[kMaxRanges] = {};
+size_t g_range_count = 0U;
+
+[[nodiscard]] bool is_page_aligned(uintptr_t value) {
+    return (value & (kPageSize - 1U)) == 0U;
+}
+
+[[nodiscard]] bool overlaps(uintptr_t base, uintptr_t end, const ManagedRange& range) {
+    return base < range.end && range.base < end;
+}
+
+void zero_page(uintptr_t physical_address) {
+    volatile uint64_t* words = reinterpret_cast<volatile uint64_t*>(physical_address);
+    constexpr size_t kWordsPerPage = kPageSize / sizeof(uint64_t);
+
+    for (size_t index = 0U; index < kWordsPerPage; ++index) {
+        words[index] = 0U;
+    }
+}
+
+[[nodiscard]] Allocation allocate_from(BackingKind backing) {
+    for (size_t index = 0U; index < g_range_count; ++index) {
+        ManagedRange& range = g_ranges[index];
+        if (range.backing != backing || range.next >= range.end) {
+            continue;
+        }
+
+        const uintptr_t physical_address = range.next;
+        range.next += kPageSize;
+        zero_page(physical_address);
+        return {.physical_address = physical_address, .backing = backing};
+    }
+
+    return {.physical_address = 0U, .backing = BackingKind::unavailable};
+}
+
+} // namespace
+
+void reset() {
+    for (size_t index = 0U; index < kMaxRanges; ++index) {
+        g_ranges[index] = {};
+    }
+    g_range_count = 0U;
+}
+
+bool add_range(uintptr_t base, size_t size, BackingKind backing) {
+    if (g_range_count >= kMaxRanges || backing == BackingKind::unavailable || size == 0U ||
+        !is_page_aligned(base) || (size % kPageSize) != 0U) {
+        return false;
+    }
+
+    const uintptr_t end = base + size;
+    if (end <= base) {
+        return false;
+    }
+
+    for (size_t index = 0U; index < g_range_count; ++index) {
+        if (overlaps(base, end, g_ranges[index])) {
+            return false;
+        }
+    }
+
+    if (backing == BackingKind::contained) {
+        if (memory::backing_for(base) != BackingKind::contained ||
+            memory::backing_for(end - 1U) != BackingKind::contained) {
+            return false;
+        }
+    }
+
+    if (backing == BackingKind::ddr && !memory::ddr_allocation_enabled()) {
+        return false;
+    }
+
+    g_ranges[g_range_count] = {
+        .base = base,
+        .next = base,
+        .end = end,
+        .backing = backing,
+    };
+    ++g_range_count;
+    return true;
+}
+
+bool add_contained_bootstrap_pool() {
+    const uintptr_t base = reinterpret_cast<uintptr_t>(__early_page_pool_start);
+    const uintptr_t end = reinterpret_cast<uintptr_t>(__early_page_pool_end);
+    if (end <= base) {
+        return false;
+    }
+
+    return add_range(base, end - base, BackingKind::contained);
+}
+
+Allocation allocate_page() {
+    if (memory::ddr_allocation_enabled()) {
+        const Allocation ddr_page = allocate_from(BackingKind::ddr);
+        if (ddr_page.valid()) {
+            return ddr_page;
+        }
+    }
+
+    return allocate_from(BackingKind::contained);
+}
+
+size_t remaining_pages(BackingKind backing) {
+    size_t count = 0U;
+
+    for (size_t index = 0U; index < g_range_count; ++index) {
+        const ManagedRange& range = g_ranges[index];
+        if (range.backing == backing && range.next < range.end) {
+            count += static_cast<size_t>((range.end - range.next) / kPageSize);
+        }
+    }
+
+    return count;
+}
+
+} // namespace jixia::microkernel::memory::page_manager
