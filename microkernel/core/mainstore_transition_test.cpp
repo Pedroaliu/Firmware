@@ -60,8 +60,7 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
         fail("pre-DDR stable page is not contained-backed");
     }
 
-    volatile uint64_t* const stable_object =
-        reinterpret_cast<volatile uint64_t*>(stable_page.physical_address);
+    volatile uint64_t* const stable_object = reinterpret_cast<volatile uint64_t*>(stable_page.physical_address);
     *stable_object = kStableObjectMagic;
     const uintptr_t stable_address = stable_page.physical_address;
 
@@ -71,8 +70,8 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
         .size = future_ddr.size - memory::snapshot().contained.size,
     };
 
-    if (memory::page_manager::add_range(
-            future_remaining.base, future_remaining.size, BackingKind::ddr)) {
+    if (memory::page_manager::add_range(future_remaining.base, future_remaining.size,
+                                        BackingKind::ddr)) {
         fail("DDR allocator range accepted before DDR lifecycle");
     }
     printk("M00_07_DDR_ALLOCATOR_GATED: PASS\n");
@@ -118,8 +117,8 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
     }
 
     if (memory::ddr_allocation_enabled() ||
-        memory::page_manager::add_range(
-            future_remaining.base, future_remaining.size, BackingKind::ddr)) {
+        memory::page_manager::add_range(future_remaining.base, future_remaining.size,
+                                        BackingKind::ddr)) {
         fail("DDR became allocator-visible before contained exit");
     }
     printk("M00_07_DDR_ONLINE: PASS\n");
@@ -183,10 +182,9 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
         fail("post-transition allocation is not DDR-backed");
     }
 
-    printk(
-        "M00_07_MAINSTORE_TRANSITION: PASS\n"
-        "M00_07_MAINSTORE_EXTEND: PASS\n"
-        "M00-07.04 fake DDR lifecycle and mainstore transition: PASS\n");
+    printk("M00_07_MAINSTORE_TRANSITION: PASS\n"
+           "M00_07_MAINSTORE_EXTEND: PASS\n"
+           "M00-07.04 fake DDR lifecycle and mainstore transition: PASS\n");
 
     hart::park();
 }
