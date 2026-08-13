@@ -229,8 +229,7 @@ bool validate_mainstore_invariants() {
         return false;
     }
 
-    const uintptr_t last_contained_address =
-        g_state.contained.base + g_state.contained.size - 1U;
+    const uintptr_t last_contained_address = g_state.contained.base + g_state.contained.size - 1U;
     if (backing_for(last_contained_address) != BackingKind::ddr) {
         return false;
     }
