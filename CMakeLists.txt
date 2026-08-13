@@ -42,6 +42,10 @@ set(JIXIA_LINKER_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
 )
 
+set(JIXIA_STAGE0_LINKER_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt_stage0.ld
+)
+
 # CMAKE_OBJCOPY/CMAKE_OBJDUMP/CMAKE_READELF are FILEPATH cache variables.
 # Passing a bare command name such as "riscv64-unknown-elf-objcopy" on the
 # CMake command line may therefore be normalized into a non-existent path
@@ -237,4 +241,68 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.readelf
 
     COMMENT "Generating Jixia firmware image and inspection files"
+)
+
+# M00-07.01: a tiny stackless XIP Stage0 linked at QEMU virt pflash0 base.
+add_executable(
+    jixia_stage0.elf
+    boot/qemu_virt/stage0.S
+)
+
+target_include_directories(
+    jixia_stage0.elf
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_compile_options(
+    jixia_stage0.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+)
+
+target_link_options(
+    jixia_stage0.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--build-id=none
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.map
+        -T${JIXIA_STAGE0_LINKER_SCRIPT}
+)
+
+set_property(
+    TARGET jixia_stage0.elf
+    APPEND PROPERTY LINK_DEPENDS ${JIXIA_STAGE0_LINKER_SCRIPT}
+)
+
+add_custom_command(
+    TARGET jixia_stage0.elf
+    POST_BUILD
+
+    COMMAND
+        ${JIXIA_OBJCOPY}
+        -O binary
+        $<TARGET_FILE:jixia_stage0.elf>
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.bin
+
+    COMMAND
+        ${JIXIA_OBJDUMP}
+        -d
+        -S
+        $<TARGET_FILE:jixia_stage0.elf>
+        >
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.dis
+
+    COMMAND
+        ${JIXIA_READELF}
+        -a
+        $<TARGET_FILE:jixia_stage0.elf>
+        >
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.readelf
+
+    COMMENT "Generating Jixia pflash Stage0 image and inspection files"
 )
