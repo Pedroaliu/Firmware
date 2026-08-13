@@ -97,6 +97,10 @@ jobs:
         run: |
           bash scripts/test-m00-07-01-pflash-stage0.sh
 
+      - name: M00-07.02 explicit contained EarlyMemory state
+        run: |
+          bash scripts/test-m00-07-02-contained-memory.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -116,3 +120,4 @@ jobs:
             build/m00-06-03/
             build/m00-06-04/
             build/m00-07-01/
+            build/m00-07-02/
