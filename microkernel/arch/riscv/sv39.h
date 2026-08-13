@@ -36,19 +36,12 @@ struct AddressSpace {
  * Map one 4 KiB supervisor page, allocating intermediate tables from
  * PageManager as required. Existing leaf mappings are not overwritten.
  */
-[[nodiscard]] bool map_page_4k(
-    const AddressSpace& address_space,
-    uintptr_t virtual_address,
-    uintptr_t physical_address,
-    PteFlags flags);
+[[nodiscard]] bool map_page_4k(const AddressSpace& address_space, uintptr_t virtual_address,
+                               uintptr_t physical_address, PteFlags flags);
 
 /** Map a page-aligned range using 4 KiB leaves. */
-[[nodiscard]] bool map_range_4k(
-    const AddressSpace& address_space,
-    uintptr_t virtual_base,
-    uintptr_t physical_base,
-    size_t size,
-    PteFlags flags);
+[[nodiscard]] bool map_range_4k(const AddressSpace& address_space, uintptr_t virtual_base,
+                                uintptr_t physical_base, size_t size, PteFlags flags);
 
 [[nodiscard]] uint64_t satp_value(const AddressSpace& address_space);
 
