@@ -7,7 +7,6 @@ namespace {
 
 using jixia::microkernel::memory::page_manager::Allocation;
 
-constexpr size_t kEntriesPerTable = kPageSize / sizeof(uint64_t);
 constexpr uint64_t kPpnMask = (1ULL << 44U) - 1ULL;
 constexpr uint64_t kLeafMask = PteFlag::read | PteFlag::write | PteFlag::execute;
 
