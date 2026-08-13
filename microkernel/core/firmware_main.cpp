@@ -13,6 +13,7 @@ extern "C" void jixia_machine_timer_test();
 extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
 extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
+extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
 
 namespace jixia::microkernel {
 namespace {
@@ -191,6 +192,22 @@ void boot_main(
            "M00_06_03_ECALL_ARMED: PASS\n");
 
     jixia_m00_06_03_enter_supervisor_ecall();
+#elif defined(JIXIA_M00_06_04_PROBE)
+    /*
+     * M00-06.04 deliberately enters M-mode with an invalid S x2/sp value,
+     * proves privileged TrapFrame storage remains on HartLocal.trap_stack,
+     * then removes mscratch so a second lower-origin ECALL must fail closed.
+     */
+    printk("\n"
+           "[Jixia][M00-06.04][PrivilegeBoundary]\n"
+           "satp        : bare (0)\n"
+           "medeleg     : 0\n"
+           "mideleg     : 0\n"
+           "pmp0        : permissive RWX NAPOT (probe only)\n"
+           "async M irq : disabled\n"
+           "M00_06_04_BOUNDARY_ARMED: PASS\n");
+
+    jixia_m00_06_04_enter_supervisor_boundary();
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();
