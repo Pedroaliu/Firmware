@@ -42,10 +42,7 @@ void copy_from_flash(uintptr_t flash_address, void* destination, size_t size) {
         return false;
     }
 
-    copy_from_flash(
-        JIXIA_QEMU_PFLASH_BASE + JIXIA_PFLASH_HEADER_OFFSET,
-        output,
-        sizeof(*output));
+    copy_from_flash(JIXIA_QEMU_PFLASH_BASE + JIXIA_PFLASH_HEADER_OFFSET, output, sizeof(*output));
 
     if (output->magic != JIXIA_PFLASH_HEADER_MAGIC ||
         output->version != JIXIA_PFLASH_HEADER_VERSION ||
@@ -101,8 +98,8 @@ bool read_extended_page(size_t page_index, uintptr_t destination_physical_addres
         return false;
     }
 
-    const uintptr_t source = static_cast<uintptr_t>(
-        JIXIA_QEMU_PFLASH_BASE + header.extended_offset + page_offset);
+    const uintptr_t source =
+        static_cast<uintptr_t>(JIXIA_QEMU_PFLASH_BASE + header.extended_offset + page_offset);
     copy_from_flash(source, reinterpret_cast<void*>(destination_physical_address), kPageSize);
     __asm__ volatile("fence rw, rw" ::: "memory");
     return true;
