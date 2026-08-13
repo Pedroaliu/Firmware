@@ -27,8 +27,7 @@ bool finish_training() {
 }
 
 bool build_topology() {
-    const jixia::microkernel::memory::Snapshot state =
-        jixia::microkernel::memory::snapshot();
+    const jixia::microkernel::memory::Snapshot state = jixia::microkernel::memory::snapshot();
 
     /*
      * Topology is deliberately a no-op in QEMU v0, but it remains a named
@@ -36,7 +35,7 @@ bool build_topology() {
      * grouping can replace it later.
      */
     return state.domain == jixia::microkernel::memory::MemoryDomain::contained &&
-        state.ddr == jixia::microkernel::memory::DdrState::trained;
+           state.ddr == jixia::microkernel::memory::DdrState::trained;
 }
 
 bool build_address_map() {
