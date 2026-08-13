@@ -16,6 +16,7 @@ extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
 extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
 extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe();
+extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe();
 
 namespace jixia::microkernel {
 namespace {
@@ -246,6 +247,13 @@ void boot_main(
      * resulting instruction page fault from contained EarlyMemory.
      */
     jixia_m00_07_03_run_pre_ddr_paging_probe();
+#elif defined(JIXIA_M00_07_04_PROBE)
+    /*
+     * M00-07.04 walks the explicit fake DDR lifecycle and proves that the
+     * contained-to-mainstore backing transition preserves firmware address
+     * identity before remaining mainstore is handed to PageManager.
+     */
+    jixia_m00_07_04_run_mainstore_transition_probe();
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();
