@@ -1,35 +1,22 @@
 #pragma once
 
 /*
- * M00-07 QEMU virt pflash0 image contract.
+ * M00-07 QEMU virt pflash0 platform contract.
  *
- * These constants are consumed by preprocessed assembly and mirrored by the
- * image-builder script. The acceptance test validates the generated header so
- * accidental layout drift fails before QEMU is launched.
+ * Stage0 remains at the reset/XIP address. The rest of the image is described
+ * by an OpenPOWER-compatible FFS v1 table at a fixed bootstrap locator.
  */
 
 #define JIXIA_QEMU_PFLASH_BASE 0x20000000
 #define JIXIA_QEMU_PFLASH_SIZE 0x02000000
 
 #define JIXIA_PFLASH_STAGE0_LIMIT 0x00001000
-#define JIXIA_PFLASH_HEADER_OFFSET 0x00001000
-#define JIXIA_PFLASH_HEADER_SIZE 64
-#define JIXIA_PFLASH_BASE_IMAGE_OFFSET 0x00010000
-#define JIXIA_PFLASH_EXTENDED_IMAGE_OFFSET 0x00100000
-
-/* Little-endian u64 encoding of ASCII "JIXIA071". */
-#define JIXIA_PFLASH_HEADER_MAGIC 0x313730414958494a
-#define JIXIA_PFLASH_HEADER_VERSION 1
-
-#define JIXIA_PFLASH_HDR_MAGIC_OFFSET 0
-#define JIXIA_PFLASH_HDR_VERSION_OFFSET 8
-#define JIXIA_PFLASH_HDR_HEADER_SIZE_OFFSET 12
-#define JIXIA_PFLASH_HDR_BASE_OFFSET_OFFSET 16
-#define JIXIA_PFLASH_HDR_BASE_SIZE_OFFSET 24
-#define JIXIA_PFLASH_HDR_BASE_LOAD_OFFSET 32
-#define JIXIA_PFLASH_HDR_BASE_ENTRY_OFFSET 40
-#define JIXIA_PFLASH_HDR_EXTENDED_OFFSET_OFFSET 48
-#define JIXIA_PFLASH_HDR_EXTENDED_SIZE_OFFSET 56
+#define JIXIA_PFLASH_TOC_OFFSET 0x00001000
+#define JIXIA_PFLASH_TOC_SIZE 0x00008000
+#define JIXIA_PFLASH_DATA_OFFSET 0x00010000
+#define JIXIA_PFLASH_BLOCK_SIZE 0x00001000
+#define JIXIA_PFLASH_BLOCK_COUNT 0x00002000
+#define JIXIA_PFLASH_MAX_FFS_ENTRIES 255
 
 #define JIXIA_CONTAINED_BASE_ADDRESS 0x80000000
 #define JIXIA_CONTAINED_ENTRY_ADDRESS 0x80000000

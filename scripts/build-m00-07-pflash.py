@@ -1,33 +1,28 @@
 #!/usr/bin/env python3
 
-"""Build the M00-07 QEMU virt pflash0 image.
-
-The layout constants are parsed from boot/qemu_virt/pflash_layout.h so Stage0
-assembly and the host image builder consume one source of truth.
-"""
+"""Build the M00-07 QEMU pflash image through the generic Jixia FFS packer."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import re
-import struct
+import sys
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
 
-_PAGE_SIZE = 4096
+from tools.pnor.ffs import build_image, inspect_image  # noqa: E402
 
 _REQUIRED_LAYOUT_CONSTANTS = (
     "JIXIA_QEMU_PFLASH_SIZE",
     "JIXIA_PFLASH_STAGE0_LIMIT",
-    "JIXIA_PFLASH_HEADER_OFFSET",
-    "JIXIA_PFLASH_HEADER_SIZE",
-    "JIXIA_PFLASH_BASE_IMAGE_OFFSET",
-    "JIXIA_PFLASH_EXTENDED_IMAGE_OFFSET",
-    "JIXIA_PFLASH_HEADER_MAGIC",
-    "JIXIA_PFLASH_HEADER_VERSION",
-    "JIXIA_CONTAINED_BASE_ADDRESS",
-    "JIXIA_CONTAINED_ENTRY_ADDRESS",
+    "JIXIA_PFLASH_TOC_OFFSET",
+    "JIXIA_PFLASH_TOC_SIZE",
+    "JIXIA_PFLASH_DATA_OFFSET",
+    "JIXIA_PFLASH_BLOCK_SIZE",
+    "JIXIA_PFLASH_BLOCK_COUNT",
 )
 
 
@@ -43,104 +38,78 @@ def parse_layout(path: Path) -> dict[str, int]:
         )
         if match is None:
             raise ValueError(f"missing layout constant {name} in {path}")
-
         values[name] = int(match.group(1), 0)
 
     return values
 
 
-def pad_to_page(payload: bytes) -> bytes:
-    if not payload:
-        raise ValueError("Extended image is empty")
-
-    padded_size = ((len(payload) + _PAGE_SIZE - 1) // _PAGE_SIZE) * _PAGE_SIZE
-    return payload + (b"\xff" * (padded_size - len(payload)))
-
-
-def build_image(
+def build_image_compat(
     stage0_path: Path,
     base_path: Path,
     output_path: Path,
     layout_path: Path,
+    manifest_path: Path,
     extended_path: Path | None,
 ) -> None:
     layout = parse_layout(layout_path)
+    if stage0_path.stat().st_size > layout["JIXIA_PFLASH_STAGE0_LIMIT"]:
+        raise ValueError("Stage0 image exceeds fixed XIP bootstrap slot")
 
-    flash_size = layout["JIXIA_QEMU_PFLASH_SIZE"]
-    stage0_limit = layout["JIXIA_PFLASH_STAGE0_LIMIT"]
-    header_offset = layout["JIXIA_PFLASH_HEADER_OFFSET"]
-    header_size = layout["JIXIA_PFLASH_HEADER_SIZE"]
-    base_offset = layout["JIXIA_PFLASH_BASE_IMAGE_OFFSET"]
-    extended_offset = layout["JIXIA_PFLASH_EXTENDED_IMAGE_OFFSET"]
+    sources = {
+        "stage0": stage0_path,
+        "base": base_path,
+    }
+    if extended_path is not None:
+        sources["extended"] = extended_path
 
-    stage0 = stage0_path.read_bytes()
-    base = base_path.read_bytes()
-    extended = b"" if extended_path is None else pad_to_page(extended_path.read_bytes())
+    result = build_image(manifest_path, output_path, sources)
 
-    if not stage0:
-        raise ValueError("Stage0 image is empty")
-    if len(stage0) > stage0_limit:
+    expected_geometry = {
+        "size": layout["JIXIA_QEMU_PFLASH_SIZE"],
+        "block_size": layout["JIXIA_PFLASH_BLOCK_SIZE"],
+        "toc_offset": layout["JIXIA_PFLASH_TOC_OFFSET"],
+        "toc_size": layout["JIXIA_PFLASH_TOC_SIZE"],
+    }
+    actual_geometry = {
+        "size": result.image_size,
+        "block_size": result.block_size,
+        "toc_offset": result.toc_offset,
+        "toc_size": result.toc_size,
+    }
+    if actual_geometry != expected_geometry:
         raise ValueError(
-            f"Stage0 is {len(stage0)} bytes, exceeds {stage0_limit} byte slot"
+            f"PNOR manifest/platform layout drift: {actual_geometry} != {expected_geometry}"
         )
-    if not base:
-        raise ValueError("Jixia Base image is empty")
-    if header_size != 64:
-        raise ValueError(f"v1 header must be 64 bytes, got {header_size}")
-    if header_offset < stage0_limit:
-        raise ValueError("flash header overlaps Stage0 slot")
-    if base_offset < header_offset + header_size:
-        raise ValueError("Base image overlaps flash header")
-    if base_offset + len(base) > flash_size:
-        raise ValueError("Base image does not fit in pflash0")
+    if result.image_size // result.block_size != layout["JIXIA_PFLASH_BLOCK_COUNT"]:
+        raise ValueError("PNOR block-count mismatch")
 
-    if extended:
-        if extended_offset < base_offset + len(base):
-            raise ValueError("Extended image overlaps Base image")
-        if extended_offset + len(extended) > flash_size:
-            raise ValueError("Extended image does not fit in pflash0")
-        header_extended_offset = extended_offset
-        header_extended_size = len(extended)
-    else:
-        header_extended_offset = 0
-        header_extended_size = 0
+    inspected = inspect_image(output_path, result.toc_offset)
+    base = inspected.partition("JXBASE")
+    extended = inspected.partition("JXEXT")
+    if base is None or base.actual_size == 0:
+        raise ValueError("generated FFS image has no JXBASE partition")
 
-    header = struct.pack(
-        "<QIIQQQQQQ",
-        layout["JIXIA_PFLASH_HEADER_MAGIC"],
-        layout["JIXIA_PFLASH_HEADER_VERSION"],
-        header_size,
-        base_offset,
-        len(base),
-        layout["JIXIA_CONTAINED_BASE_ADDRESS"],
-        layout["JIXIA_CONTAINED_ENTRY_ADDRESS"],
-        header_extended_offset,
-        header_extended_size,
-    )
-    if len(header) != header_size:
-        raise AssertionError("packed JixiaFlashHeader size mismatch")
-
-    image = bytearray(b"\xff" * flash_size)
-    image[0 : len(stage0)] = stage0
-    image[header_offset : header_offset + header_size] = header
-    image[base_offset : base_offset + len(base)] = base
-    if extended:
-        image[extended_offset : extended_offset + len(extended)] = extended
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(image)
-
+    image = output_path.read_bytes()
     digest = hashlib.sha256(image).hexdigest()
+
     print(f"pflash={output_path}")
     print(f"pflash_size={len(image)}")
-    print(f"stage0_size={len(stage0)}")
-    print(f"header_offset=0x{header_offset:x}")
-    print(f"base_offset=0x{base_offset:x}")
-    print(f"base_size={len(base)}")
-    print(f"base_load=0x{layout['JIXIA_CONTAINED_BASE_ADDRESS']:x}")
-    print(f"base_entry=0x{layout['JIXIA_CONTAINED_ENTRY_ADDRESS']:x}")
-    print(f"extended_offset=0x{header_extended_offset:x}")
-    print(f"extended_size={header_extended_size}")
+    print(f"stage0_size={stage0_path.stat().st_size}")
+    print(f"ffs_toc_offset=0x{result.toc_offset:x}")
+    print(f"ffs_toc_size=0x{result.toc_size:x}")
+    print(f"base_offset=0x{base.offset:x}")
+    print(f"base_size={base.actual_size}")
+    print("base_load=0x80000000")
+    print("base_entry=0x80000000")
+    print(f"extended_offset=0x{0 if extended is None else extended.offset:x}")
+    print(f"extended_size={0 if extended is None else extended.actual_size}")
+    for partition in inspected.partitions:
+        print(
+            f"partition={partition.name} "
+            f"offset=0x{partition.offset:x} "
+            f"size=0x{partition.allocated_size:x} "
+            f"actual={partition.actual_size}"
+        )
     print(f"sha256={digest}")
 
 
@@ -155,13 +124,19 @@ def main() -> int:
         type=Path,
         default=Path("boot/qemu_virt/pflash_layout.h"),
     )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=ROOT_DIR / "pnor/qemu_virt.toml",
+    )
     args = parser.parse_args()
 
-    build_image(
+    build_image_compat(
         args.stage0,
         args.base,
         args.output,
         args.layout_header,
+        args.manifest,
         args.extended,
     )
     return 0

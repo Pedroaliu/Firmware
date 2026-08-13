@@ -1,3 +1,4 @@
+#include "boot/common/ffs_format.h"
 #include "boot/qemu_virt/pflash_layout.h"
 
 /*
@@ -8,8 +9,8 @@
  *   a1 = FDT address
  * and jumps here at pflash0 base when TCG uses pflash0 + -bios none.
  *
- * This first acceptance path is deliberately single-hart. Stage0 never
- * constructs a stack and never writes its own flash-mapped code/data.
+ * Stage0 understands only the fixed FFS TOC locator plus the JXBASE partition
+ * identity. It does not know the physical placement of JXBASE in advance.
  */
 
 .section .text.boot0, "ax", @progbits
@@ -29,56 +30,132 @@ jixia_stage0_start:
     la a4, .Lstage0_marker
     jal ra, .Luart_puts
 
-    /* Locate and validate the fixed v1 image header in memory-mapped flash. */
-    li s0, JIXIA_QEMU_PFLASH_BASE + JIXIA_PFLASH_HEADER_OFFSET
+    /* Locate the OpenPOWER-compatible FFS v1 TOC. */
+    li s0, JIXIA_QEMU_PFLASH_BASE + JIXIA_PFLASH_TOC_OFFSET
 
-    ld t0, JIXIA_PFLASH_HDR_MAGIC_OFFSET(s0)
-    li t1, JIXIA_PFLASH_HEADER_MAGIC
-    bne t0, t1, .Lheader_fail
+    /* The FFS header checksum is the XOR of all native 32-bit words. */
+    mv t5, s0
+    li t4, JIXIA_FFS_HEADER_SIZE
+    jal ra, .Lxor_checksum
+    bnez t6, .Ltoc_fail
 
-    lw t0, JIXIA_PFLASH_HDR_VERSION_OFFSET(s0)
-    li t1, JIXIA_PFLASH_HEADER_VERSION
-    bne t0, t1, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_MAGIC_OFFSET
+    jal ra, .Lload_be32
+    li t0, JIXIA_FFS_MAGIC
+    bne t6, t0, .Ltoc_fail
 
-    lw t0, JIXIA_PFLASH_HDR_HEADER_SIZE_OFFSET(s0)
-    li t1, JIXIA_PFLASH_HEADER_SIZE
-    bne t0, t1, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_VERSION_OFFSET
+    jal ra, .Lload_be32
+    li t0, JIXIA_FFS_VERSION
+    bne t6, t0, .Ltoc_fail
 
-    ld s1, JIXIA_PFLASH_HDR_BASE_OFFSET_OFFSET(s0)
-    ld s2, JIXIA_PFLASH_HDR_BASE_SIZE_OFFSET(s0)
-    ld s3, JIXIA_PFLASH_HDR_BASE_LOAD_OFFSET(s0)
-    ld s4, JIXIA_PFLASH_HDR_BASE_ENTRY_OFFSET(s0)
+    addi t5, s0, JIXIA_FFS_HDR_ENTRY_SIZE_OFFSET
+    jal ra, .Lload_be32
+    li t0, JIXIA_FFS_ENTRY_SIZE
+    bne t6, t0, .Ltoc_fail
 
-    /* Empty, overlapping, wrapping, or out-of-flash Base images are invalid. */
-    beqz s2, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_ENTRY_COUNT_OFFSET
+    jal ra, .Lload_be32
+    mv s1, t6
+    beqz s1, .Ltoc_fail
+    li t0, JIXIA_PFLASH_MAX_FFS_ENTRIES
+    bgtu s1, t0, .Ltoc_fail
 
-    li t0, JIXIA_PFLASH_BASE_IMAGE_OFFSET
-    bltu s1, t0, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_BLOCK_SIZE_OFFSET
+    jal ra, .Lload_be32
+    mv s2, t6
+    li t0, JIXIA_PFLASH_BLOCK_SIZE
+    bne s2, t0, .Ltoc_fail
 
-    li t0, JIXIA_QEMU_PFLASH_SIZE
-    bgeu s1, t0, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_BLOCK_COUNT_OFFSET
+    jal ra, .Lload_be32
+    li t0, JIXIA_PFLASH_BLOCK_COUNT
+    bne t6, t0, .Ltoc_fail
 
-    add t1, s1, s2
-    bltu t1, s1, .Lheader_fail
-    bgtu t1, t0, .Lheader_fail
+    addi t5, s0, JIXIA_FFS_HDR_SIZE_OFFSET
+    jal ra, .Lload_be32
+    mul t0, t6, s2
+    li t1, JIXIA_PFLASH_TOC_SIZE
+    bne t0, t1, .Ltoc_fail
 
-    /* M00-07.01 deliberately pins contained Base identity at 0x80000000. */
-    li t0, JIXIA_CONTAINED_BASE_ADDRESS
-    bne s3, t0, .Lheader_fail
+    /* Ensure header + declared entries fit inside the reserved TOC region. */
+    li t0, JIXIA_FFS_ENTRY_SIZE
+    mul t0, t0, s1
+    addi t0, t0, JIXIA_FFS_HEADER_SIZE
+    li t1, JIXIA_PFLASH_TOC_SIZE
+    bgtu t0, t1, .Ltoc_fail
 
-    li t0, JIXIA_CONTAINED_ENTRY_ADDRESS
-    bne s4, t0, .Lheader_fail
+    /* Scan FFS entries for the null-terminated partition name "JXBASE". */
+    addi s3, s0, JIXIA_FFS_HEADER_SIZE
+    mv s4, s1
 
-    /* Translate image-relative Base offset into the pflash MMIO address. */
-    li t0, JIXIA_QEMU_PFLASH_BASE
-    add s1, s1, t0
+.Lscan_entry:
+    beqz s4, .Ltoc_fail
+
+    mv t5, s3
+    li t4, JIXIA_FFS_ENTRY_SIZE
+    jal ra, .Lxor_checksum
+    bnez t6, .Ltoc_fail
+
+    lbu t0, 0(s3)
+    li t1, 0x4a /* J */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 1(s3)
+    li t1, 0x58 /* X */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 2(s3)
+    li t1, 0x42 /* B */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 3(s3)
+    li t1, 0x41 /* A */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 4(s3)
+    li t1, 0x53 /* S */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 5(s3)
+    li t1, 0x45 /* E */
+    bne t0, t1, .Lnext_entry
+    lbu t0, 6(s3)
+    bnez t0, .Lnext_entry
+
+    /* Convert FFS block units into pflash-relative byte ranges. */
+    addi t5, s3, JIXIA_FFS_ENTRY_BASE_OFFSET
+    jal ra, .Lload_be32
+    mv s1, t6
+
+    addi t5, s3, JIXIA_FFS_ENTRY_SIZE_OFFSET
+    jal ra, .Lload_be32
+    mv s4, t6
+
+    addi t5, s3, JIXIA_FFS_ENTRY_ACTUAL_OFFSET
+    jal ra, .Lload_be32
+    mv s5, t6
+    beqz s5, .Ltoc_fail
+
+    mul t0, s1, s2
+    mul t1, s4, s2
+    bgtu s5, t1, .Ltoc_fail
+
+    li t2, JIXIA_PFLASH_DATA_OFFSET
+    bltu t0, t2, .Ltoc_fail
+
+    add t2, t0, s5
+    bltu t2, t0, .Ltoc_fail
+    li t3, JIXIA_QEMU_PFLASH_SIZE
+    bgtu t2, t3, .Ltoc_fail
+
+    li t1, JIXIA_QEMU_PFLASH_BASE
+    add s1, t1, t0
+    mv s2, s5
+    li s3, JIXIA_CONTAINED_BASE_ADDRESS
+    li s4, JIXIA_CONTAINED_ENTRY_ADDRESS
+
+    la a4, .Lffs_marker
+    jal ra, .Luart_puts
 
     /*
      * Copy the resident Base into the QEMU backing region that M00-07 treats
      * semantically as contained EarlyMemory until DDR_ONLINE.
-     *
-     * Byte copies avoid imposing a payload-alignment requirement on the image
-     * builder and keep the v1 header contract simple.
      */
 .Lcopy_base:
     beqz s2, .Lcopy_done
@@ -100,8 +177,13 @@ jixia_stage0_start:
     /* Preserve QEMU's a0=hartid and a1=FDT handoff into the resident Base. */
     jr s4
 
-.Lheader_fail:
-    la a4, .Lheader_fail_marker
+.Lnext_entry:
+    addi s3, s3, JIXIA_FFS_ENTRY_SIZE
+    addi s4, s4, -1
+    j .Lscan_entry
+
+.Ltoc_fail:
+    la a4, .Ltoc_fail_marker
     jal ra, .Luart_puts
 
 .Lfatal_park:
@@ -111,6 +193,38 @@ jixia_stage0_start:
 .Lsecondary_park:
     wfi
     j .Lsecondary_park
+
+/* Input: t5 -> big-endian u32. Output: t6. Clobbers t0/t1. */
+.Lload_be32:
+    lbu t6, 0(t5)
+    slli t6, t6, 24
+
+    lbu t0, 1(t5)
+    slli t0, t0, 16
+    or t6, t6, t0
+
+    lbu t0, 2(t5)
+    slli t0, t0, 8
+    or t6, t6, t0
+
+    lbu t0, 3(t5)
+    or t6, t6, t0
+    ret
+
+/* Input: t5 -> aligned bytes, t4=size (multiple of 4). Output: t6 XOR checksum. */
+.Lxor_checksum:
+    li t6, 0
+
+.Lchecksum_next:
+    beqz t4, .Lchecksum_done
+    lw t0, 0(t5)
+    xor t6, t6, t0
+    addi t5, t5, 4
+    addi t4, t4, -4
+    j .Lchecksum_next
+
+.Lchecksum_done:
+    ret
 
 /*
  * Minimal stackless 16550A string output used only for Stage0 evidence.
@@ -142,8 +256,11 @@ jixia_stage0_start:
 .Lstage0_marker:
     .asciz "M00_07_PFLASH_STAGE0: PASS\n"
 
+.Lffs_marker:
+    .asciz "M00_07_PNOR_FFS: PASS\n"
+
 .Lbase_transfer_marker:
     .asciz "M00_07_BASE_TRANSFER: PASS\n"
 
-.Lheader_fail_marker:
+.Ltoc_fail_marker:
     .asciz "M00_07_PFLASH_HEADER: FAIL\n"

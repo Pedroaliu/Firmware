@@ -146,6 +146,7 @@ add_executable(
     microkernel/core/recoverable_trap_test.cpp
     microkernel/core/timer_interrupt_test.cpp
     microkernel/core/trap_frame_test.cpp
+    microkernel/firmware_store/ffs.cpp
     microkernel/memory/memory_lifecycle.cpp
     microkernel/memory/page_manager.cpp
     microkernel/memory/flash_provider.cpp

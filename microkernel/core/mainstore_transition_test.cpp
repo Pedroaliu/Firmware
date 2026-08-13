@@ -60,7 +60,8 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
         fail("pre-DDR stable page is not contained-backed");
     }
 
-    volatile uint64_t* const stable_object = reinterpret_cast<volatile uint64_t*>(stable_page.physical_address);
+    volatile uint64_t* const stable_object =
+        reinterpret_cast<volatile uint64_t*>(stable_page.physical_address);
     *stable_object = kStableObjectMagic;
     const uintptr_t stable_address = stable_page.physical_address;
 
