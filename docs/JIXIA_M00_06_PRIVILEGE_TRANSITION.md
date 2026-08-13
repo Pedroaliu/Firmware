@@ -1,8 +1,8 @@
 # Jixia M00-06 Privilege Transition Foundation
 
-**Status:** DONE  
-**Stable baseline:** `main` after M00-06.04 squash integration  
-**Umbrella branch:** `milestone/m00-06-privilege-transition`  
+**Status:** DONE
+**Stable baseline:** `main` after M00-06.04 squash integration
+**Umbrella branch:** `milestone/m00-06-privilege-transition`
 **Accepted through:** `M00-06.04 hostile lower-privilege boundary acceptance`
 
 ## 1. Objective
@@ -99,7 +99,7 @@ Accepted invariants:
 
 ```text
 [x] a live normal M-mode call stack is not used as runtime TrapFrame storage
-[x] every runtime M-level trap uses a dedicated per-hart trusted trap stack
+[x] every runtime M-level trap uses a dedicated per-hart trusted M trap stack
 [x] trap entry saves interrupted x2/sp as a value before switching stacks
 [x] M-mode never dereferences interrupted S/U stack storage during trap entry
 [x] M-origin TrapFrame/recoverable/timer semantics are preserved after moving frame storage
