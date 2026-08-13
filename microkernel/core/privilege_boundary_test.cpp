@@ -22,35 +22,28 @@ constexpr Xlen kMstatusMppSupervisor = 0x1U << kMstatusMppShift;
 
 } // namespace
 
-extern "C" bool jixia_m00_06_04_try_handle_supervisor_ecall(TrapFrame* frame)
-{
-    if (frame == nullptr)
-    {
+extern "C" bool jixia_m00_06_04_try_handle_supervisor_ecall(TrapFrame* frame) {
+    if (frame == nullptr) {
         return false;
     }
 
     const TrapCause cause{frame->mcause};
-    if (!cause.is_exception(ExceptionCode::environment_call_from_s))
-    {
+    if (!cause.is_exception(ExceptionCode::environment_call_from_s)) {
         return false;
     }
 
     const uintptr_t expected_ecall_pc =
         reinterpret_cast<uintptr_t>(jixia_m00_06_04_hostile_sp_ecall_site);
-    if (frame->mepc != expected_ecall_pc)
-    {
+    if (frame->mepc != expected_ecall_pc) {
         return false;
     }
 
-    if ((frame->mstatus & kMstatusMppMask) != kMstatusMppSupervisor)
-    {
+    if ((frame->mstatus & kMstatusMppMask) != kMstatusMppSupervisor) {
         return false;
     }
 
-    if (frame->x[2] != M00_06_04_HOSTILE_SP_MARKER ||
-        frame->x[3] != M00_06_04_GP_MARKER || frame->x[10] != M00_06_04_A0_MARKER ||
-        frame->x[17] != M00_06_04_A7_MARKER)
-    {
+    if (frame->x[2] != M00_06_04_HOSTILE_SP_MARKER || frame->x[3] != M00_06_04_GP_MARKER ||
+        frame->x[10] != M00_06_04_A0_MARKER || frame->x[17] != M00_06_04_A7_MARKER) {
         return false;
     }
 
@@ -63,18 +56,15 @@ extern "C" bool jixia_m00_06_04_try_handle_supervisor_ecall(TrapFrame* frame)
     const uintptr_t frame_address = reinterpret_cast<uintptr_t>(frame);
     const uintptr_t frame_end = frame_address + sizeof(TrapFrame);
 
-    if ((frame_address % TRAP_FRAME_ALIGNMENT) != 0U)
-    {
+    if ((frame_address % TRAP_FRAME_ALIGNMENT) != 0U) {
         return false;
     }
 
-    if (frame_address < local.trap_stack_bottom || frame_end > local.trap_stack_top)
-    {
+    if (frame_address < local.trap_stack_bottom || frame_end > local.trap_stack_top) {
         return false;
     }
 
-    if (local.trap_active != 1U)
-    {
+    if (local.trap_active != 1U) {
         return false;
     }
 
