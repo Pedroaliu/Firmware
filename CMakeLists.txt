@@ -26,6 +26,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_06_04_PROBE
+    "Boot the M00-06.04 hostile lower-privilege stack boundary probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr
     -mabi=lp64
@@ -101,6 +107,7 @@ add_executable(
     microkernel/arch/riscv/trap.S
     microkernel/arch/riscv/trap_frame_test.S
     microkernel/arch/riscv/privilege_transition_test.S
+    microkernel/arch/riscv/privilege_boundary_test.S
     microkernel/arch/riscv/instruction_decode.cpp
 
     lib/format.cpp
@@ -108,6 +115,7 @@ add_executable(
     microkernel/console/printk.cpp
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
+    microkernel/core/privilege_boundary_test.cpp
     microkernel/core/timer.cpp
     microkernel/core/smp_timer_test.cpp
     microkernel/core/kernel_print_test.cpp
@@ -146,6 +154,14 @@ if(JIXIA_M00_06_03_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_06_03_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_06_04_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_06_04_PROBE=1
     )
 endif()
 
