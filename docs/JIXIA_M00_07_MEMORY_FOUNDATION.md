@@ -3,6 +3,7 @@
 **Status:** ACTIVE
 **Branch:** `milestone/m00-07-memory-foundation`
 **Reference model:** Hostboot cache-contained -> mainstore lifecycle, adapted to RISC-V/QEMU first and later to Jingjie/SimSoc hardware models
+**Accepted through:** `M00-07.02 explicit contained EarlyMemory state`
 
 ## 1. Objective
 
@@ -257,34 +258,55 @@ access another nonresident firmware VA
 
 ## 10. M00-07 acceptance sequence
 
-### M00-07.01 — pflash Stage0 -> resident Base
+### M00-07.01 — pflash Stage0 -> resident Base — DONE
 
 ```text
-[ ] 32 MiB pflash image is generated with explicit header
-[ ] QEMU runs with pflash0 + -bios none
-[ ] Stage0 executes XIP from 0x20000000
-[ ] Stage0 validates header and copies Base to 0x80000000
-[ ] existing a0/a1 handoff survives
-[ ] Base enters the existing Mozi bootstrap
-[ ] old M00 foundation regressions remain intact on the normal path
+[x] 32 MiB pflash image is generated with explicit header
+[x] QEMU runs with pflash0 + -bios none
+[x] Stage0 executes XIP from 0x20000000
+[x] Stage0 validates header and copies Base to 0x80000000
+[x] existing a0/a1 handoff survives
+[x] Base enters the existing Mozi bootstrap
+[x] old M00 foundation regressions remain intact on the normal path
 ```
 
-Machine marker target:
+Accepted evidence:
 
 ```text
+GitHub Actions run 31665208312
+pflash_size=33554432
+stage0_size=255
+base_load=0x80000000
+base_entry=0x80000000
 M00_07_PFLASH_STAGE0: PASS
 M00_07_BASE_TRANSFER: PASS
+M00-07.01 pflash Stage0 -> resident Base: PASS
 ```
 
-### M00-07.02 — contained EarlyMemory state
+### M00-07.02 — contained EarlyMemory state — DONE
 
 ```text
-[ ] explicit memory-domain state exists
-[ ] Base begins in MEM_CONTAINED
-[ ] normal DDR ranges are unavailable to allocators before DDR_ONLINE
+[x] explicit memory-domain state exists
+[x] Base begins in MEM_CONTAINED
+[x] DDR lifecycle begins in DDR_OFFLINE
+[x] the first 8 MiB firmware window reports contained backing semantics
+[x] addresses immediately outside the contained window are unavailable pre-DDR
+[x] normal DDR allocation remains disabled before DDR_ONLINE
 ```
 
-### M00-07.03 — pre-DDR flash-backed page fault
+Accepted evidence:
+
+```text
+GitHub Actions run 31665697206
+format/build: PASS
+M00-02..M00-06 regressions: PASS
+M00-07.01 pflash Stage0 -> resident Base: PASS
+M00-07.02 explicit contained EarlyMemory state: PASS
+```
+
+The 8 MiB value is a QEMU-v0 semantic contained capacity, not a claim that QEMU provides an 8 MiB L2/L3 cache. The software contract remains `EarlyMemory`/contained backing.
+
+### M00-07.03 — pre-DDR flash-backed page fault — ACTIVE
 
 ```text
 [ ] resident pager/provider exists
