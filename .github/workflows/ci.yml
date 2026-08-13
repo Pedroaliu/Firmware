@@ -101,6 +101,10 @@ jobs:
         run: |
           bash scripts/test-m00-07-02-contained-memory.sh
 
+      - name: M00-07.03 pre-DDR flash-backed paging
+        run: |
+          bash scripts/test-m00-07-03-pre-ddr-paging.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,3 +125,4 @@ jobs:
             build/m00-06-04/
             build/m00-07-01/
             build/m00-07-02/
+            build/m00-07-03/
