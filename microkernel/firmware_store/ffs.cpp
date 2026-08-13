@@ -18,8 +18,7 @@ struct ParsedHeader {
 }
 
 [[nodiscard]] uint32_t load_be32(const volatile uint8_t* address) {
-    return (static_cast<uint32_t>(address[0]) << 24U) |
-           (static_cast<uint32_t>(address[1]) << 16U) |
+    return (static_cast<uint32_t>(address[0]) << 24U) | (static_cast<uint32_t>(address[1]) << 16U) |
            (static_cast<uint32_t>(address[2]) << 8U) | static_cast<uint32_t>(address[3]);
 }
 
