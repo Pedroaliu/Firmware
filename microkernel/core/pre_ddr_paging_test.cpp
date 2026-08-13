@@ -39,14 +39,12 @@ uint32_t g_page_fault_count = 0U;
         return false;
     }
 
-    const jixia::microkernel::hart::HartLocal& local =
-        jixia::microkernel::hart::current();
+    const jixia::microkernel::hart::HartLocal& local = jixia::microkernel::hart::current();
     const uintptr_t frame_address = reinterpret_cast<uintptr_t>(&frame);
     const uintptr_t frame_end = frame_address + sizeof(TrapFrame);
 
-    return local.trap_active == 1U &&
-        (frame_address % TRAP_FRAME_ALIGNMENT) == 0U &&
-        frame_address >= local.trap_stack_bottom && frame_end <= local.trap_stack_top;
+    return local.trap_active == 1U && (frame_address % TRAP_FRAME_ALIGNMENT) == 0U &&
+           frame_address >= local.trap_stack_bottom && frame_end <= local.trap_stack_top;
 }
 
 void print_failure(const char* reason) {
@@ -55,9 +53,8 @@ void print_failure(const char* reason) {
 
 [[noreturn]] void finish_probe(bool passed) {
     if (passed) {
-        jixia::microkernel::printk(
-            "M00_07_PRE_DDR_PAGING_RESUME: PASS\n"
-            "M00-07.03 pre-DDR flash-backed paging: PASS\n");
+        jixia::microkernel::printk("M00_07_PRE_DDR_PAGING_RESUME: PASS\n"
+                                   "M00-07.03 pre-DDR flash-backed paging: PASS\n");
     } else {
         jixia::microkernel::printk("M00_07_PRE_DDR_PAGING: FAIL (pageable result)\n");
     }
@@ -92,22 +89,18 @@ void print_failure(const char* reason) {
         return false;
     }
 
-    if (!jixia::microkernel::memory::flash_provider::read_extended_page(
-            0U, page.physical_address)) {
+    if (!jixia::microkernel::memory::flash_provider::read_extended_page(0U,
+                                                                        page.physical_address)) {
         print_failure("pflash Extended page read failed");
         return false;
     }
 
     constexpr jixia::arch::riscv::sv39::PteFlags kPageFlags =
-        jixia::arch::riscv::sv39::PteFlag::read |
-        jixia::arch::riscv::sv39::PteFlag::execute |
+        jixia::arch::riscv::sv39::PteFlag::read | jixia::arch::riscv::sv39::PteFlag::execute |
         jixia::arch::riscv::sv39::PteFlag::accessed;
 
-    if (!jixia::arch::riscv::sv39::map_page_4k(
-            g_address_space,
-            M00_07_03_PAGEABLE_VA,
-            page.physical_address,
-            kPageFlags)) {
+    if (!jixia::arch::riscv::sv39::map_page_4k(g_address_space, M00_07_03_PAGEABLE_VA,
+                                               page.physical_address, kPageFlags)) {
         print_failure("Sv39 page installation failed");
         return false;
     }
@@ -116,10 +109,9 @@ void print_failure(const char* reason) {
     jixia::arch::riscv::sv39::fence_address(M00_07_03_PAGEABLE_VA);
     jixia::arch::riscv::sv39::fence_instruction_stream();
 
-    jixia::microkernel::printk(
-        "M00_07_PRE_DDR_PAGE_FAULT: PASS\n"
-        "M00_07_PRE_DDR_FLASH_READ: PASS\n"
-        "M00_07_PRE_DDR_BACKING_EARLY: PASS\n");
+    jixia::microkernel::printk("M00_07_PRE_DDR_PAGE_FAULT: PASS\n"
+                               "M00_07_PRE_DDR_FLASH_READ: PASS\n"
+                               "M00_07_PRE_DDR_BACKING_EARLY: PASS\n");
     return true;
 }
 
@@ -134,8 +126,7 @@ void print_failure(const char* reason) {
         return false;
     }
 
-    const uintptr_t completion_pc =
-        reinterpret_cast<uintptr_t>(jixia_m00_07_03_completion_ecall);
+    const uintptr_t completion_pc = reinterpret_cast<uintptr_t>(jixia_m00_07_03_completion_ecall);
     const uintptr_t failure_pc = reinterpret_cast<uintptr_t>(jixia_m00_07_03_failure_ecall);
 
     if (frame.mepc == completion_pc && frame.x[10] == M00_07_03_ECALL_PASS &&
@@ -175,18 +166,13 @@ extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe() {
 
     const Snapshot state = memory::snapshot();
     constexpr jixia::arch::riscv::sv39::PteFlags kResidentFlags =
-        jixia::arch::riscv::sv39::PteFlag::read |
-        jixia::arch::riscv::sv39::PteFlag::write |
-        jixia::arch::riscv::sv39::PteFlag::execute |
-        jixia::arch::riscv::sv39::PteFlag::accessed |
+        jixia::arch::riscv::sv39::PteFlag::read | jixia::arch::riscv::sv39::PteFlag::write |
+        jixia::arch::riscv::sv39::PteFlag::execute | jixia::arch::riscv::sv39::PteFlag::accessed |
         jixia::arch::riscv::sv39::PteFlag::dirty;
 
-    if (!jixia::arch::riscv::sv39::map_range_4k(
-            g_address_space,
-            state.contained.base,
-            state.contained.base,
-            state.contained.size,
-            kResidentFlags)) {
+    if (!jixia::arch::riscv::sv39::map_range_4k(g_address_space, state.contained.base,
+                                                state.contained.base, state.contained.size,
+                                                kResidentFlags)) {
         printk("M00_07_PRE_DDR_PAGING: FAIL (resident identity map)\n");
         hart::park();
     }
