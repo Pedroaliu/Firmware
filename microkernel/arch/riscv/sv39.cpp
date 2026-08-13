@@ -50,8 +50,7 @@ constexpr uint64_t kLeafMask = PteFlag::read | PteFlag::write | PteFlag::execute
         return pte_physical_address(parent_pte);
     }
 
-    const Allocation allocation =
-        jixia::microkernel::memory::page_manager::allocate_page();
+    const Allocation allocation = jixia::microkernel::memory::page_manager::allocate_page();
     if (!allocation.valid()) {
         return 0U;
     }
@@ -71,11 +70,8 @@ AddressSpace create_address_space() {
     return {.root_physical_address = allocation.physical_address};
 }
 
-bool map_page_4k(
-    const AddressSpace& address_space,
-    uintptr_t virtual_address,
-    uintptr_t physical_address,
-    PteFlags flags) {
+bool map_page_4k(const AddressSpace& address_space, uintptr_t virtual_address,
+                 uintptr_t physical_address, PteFlags flags) {
     if (!address_space.valid() || !is_page_aligned(virtual_address) ||
         !is_page_aligned(physical_address)) {
         return false;
@@ -107,12 +103,8 @@ bool map_page_4k(
     return true;
 }
 
-bool map_range_4k(
-    const AddressSpace& address_space,
-    uintptr_t virtual_base,
-    uintptr_t physical_base,
-    size_t size,
-    PteFlags flags) {
+bool map_range_4k(const AddressSpace& address_space, uintptr_t virtual_base,
+                  uintptr_t physical_base, size_t size, PteFlags flags) {
     if (size == 0U || !is_page_aligned(virtual_base) || !is_page_aligned(physical_base) ||
         (size % kPageSize) != 0U) {
         return false;
