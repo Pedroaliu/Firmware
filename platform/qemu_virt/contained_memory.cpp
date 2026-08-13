@@ -5,8 +5,7 @@
 namespace jixia::platform::qemu_virt::contained_memory {
 
 bool flush_to_mainstore() {
-    const jixia::microkernel::memory::Snapshot state =
-        jixia::microkernel::memory::snapshot();
+    const jixia::microkernel::memory::Snapshot state = jixia::microkernel::memory::snapshot();
 
     if (state.domain != jixia::microkernel::memory::MemoryDomain::transitioning ||
         state.ddr != jixia::microkernel::memory::DdrState::online ||
