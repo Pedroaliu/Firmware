@@ -116,10 +116,11 @@ size_t promote_backing(BackingKind from, BackingKind to) {
         return 0U;
     }
 
-    size_t promoted_ranges = 0U;
+    size_t promotable_ranges = 0U;
 
+    /* Validate the complete transition before mutating any allocator range. */
     for (size_t index = 0U; index < g_range_count; ++index) {
-        ManagedRange& range = g_ranges[index];
+        const ManagedRange& range = g_ranges[index];
         if (range.backing != from) {
             continue;
         }
@@ -128,11 +129,21 @@ size_t promote_backing(BackingKind from, BackingKind to) {
             return 0U;
         }
 
-        range.backing = to;
-        ++promoted_ranges;
+        ++promotable_ranges;
     }
 
-    return promoted_ranges;
+    if (promotable_ranges == 0U) {
+        return 0U;
+    }
+
+    for (size_t index = 0U; index < g_range_count; ++index) {
+        ManagedRange& range = g_ranges[index];
+        if (range.backing == from) {
+            range.backing = to;
+        }
+    }
+
+    return promotable_ranges;
 }
 
 Allocation allocate_page() {
