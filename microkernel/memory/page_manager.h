@@ -32,6 +32,12 @@ void reset();
 /** Register the linker-reserved contained bootstrap pool. */
 [[nodiscard]] bool add_contained_bootstrap_pool();
 
+/**
+ * Relabel existing managed ranges after a same-address backing transition.
+ * base/next/end are deliberately untouched; live allocations do not move.
+ */
+[[nodiscard]] size_t promote_backing(BackingKind from, BackingKind to);
+
 /** Allocate and zero one physical page. No free/coalescing policy in M00-07. */
 [[nodiscard]] Allocation allocate_page();
 
