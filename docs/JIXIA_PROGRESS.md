@@ -2,13 +2,13 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-12
+- **Last updated:** 2026-08-13
 - **Working mode:** solo development with ChatGPT research/review/implementation support
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-06-04-privilege-boundary-acceptance`
-- **Current milestone:** `M00-06 Privilege transition foundation`
-- **Current status:** ACTIVE — M00-06.03 S->M->S ECALL round trip accepted; next prove hostile lower-privilege stack handling and close M00-06
-- **Previous milestone:** `M00-05 Per-hart state, stacks, and SMP foundation` — DONE and integrated into `main`
+- **Current progress branch:** `milestone/m00-07-memory-foundation`
+- **Current milestone:** `M00-07 Memory foundation`
+- **Current status:** ACTIVE — implement the Hostboot-inspired flash -> contained memory -> DDR/mainstore lifecycle with stable firmware address identity
+- **Previous milestone:** `M00-06 Privilege transition foundation` — DONE; M00-06.04 hostile lower-privilege boundary accepted in CI run `31664329150`
 
 ## Status legend
 
@@ -33,9 +33,9 @@
 | F00-01 Kernel print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, append-only KernelLogBuffer, temporary UART mirror, `printk` |
 | Console/timer integration | DONE | PR #8; `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | timer and console foundations coexist without regression |
 | M00-05 Per-hart state, stacks, SMP foundation | DONE | `bash scripts/test-m00-05-population.sh`; user-confirmed 2026-08-11; `docs/JIXIA_M00_05_SMP_FOUNDATION.md` | private stacks, HartLocal/mscratch, explicit publication, FDT population, per-hart timers, 1/2/4-hart acceptance, controlled 5-hart rejection |
-| M00-06 Privilege transition foundation | ACTIVE | `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`; CI run `31582257350` | M00-06.01 trusted trap entry DONE; M00-06.02 M->S supervisor entry DONE; M00-06.03 S->M->S ECALL round trip DONE; M00-06.04 boundary acceptance active |
-| M00-07 Early physical allocator | NEXT | pending | supports later service/memory work |
-| M00-08 Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
+| M00-06 Privilege transition foundation | DONE | `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`; CI run `31664329150` | trusted trap entry, M->S, S->M->S ECALL, hostile S stack and no-anchor fail-closed acceptance |
+| M00-07 Memory foundation | ACTIVE | `docs/JIXIA_MEMORY_MANAGEMENT_RESEARCH.md`; implementation evidence pending | flash/PNOR-equivalent image, contained early memory, pre-DDR paging, fake DDR lifecycle, stable-address transition, mainstore extension |
+| M00-08 Structured event and trace ABI | NEXT | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
 | M00-09 Automated QEMU test harness | PLANNED | `scripts/jixia.sh`; milestone scripts remain authoritative | consolidate machine-checkable regression tests later |
 
 ---
@@ -189,29 +189,27 @@ Structured trace/event evidence is not yet applicable because the shared event A
 
 ---
 
-## NOW — M00-06 Privilege transition foundation
+## DONE — M00-06 Privilege transition foundation
 
-### Objective
+### Objective achieved
 
-Prove a small, controlled privilege transition before introducing paging, allocator, scheduler, or service isolation.
+Mozi now has a controlled M->S->M transition and a machine-checkable proof that lower-privilege x2/sp cannot redirect M-mode trap storage.
 
-Target state machine:
+Completed state machine:
 
 ```text
 M-mode Mozi
-    -> configure trusted runtime M trap stack
-    -> configure MPP = S, mepc, PMP/bootstrap permissions
+    -> dedicated trusted per-hart M trap stack
+    -> MPP = S, mepc = S entry, satp = 0
     -> mret
-    -> S-mode payload with satp = 0 and its own stack
-    -> ecall / controlled exception
-    -> M-mode trap on trusted per-hart trap stack
-    -> prove previous privilege and saved state
-    -> controlled return or termination
+    -> S-mode payload with its own stack
+    -> ECALL
+    -> M trap entry preserves interrupted x2 only as a value
+    -> TrapFrame constructed on trusted HartLocal trap storage
+    -> validate and return to S
+    -> hostile x2/sp proof
+    -> no-HartLocal lower-origin fail-closed proof
 ```
-
-### Accepted through M00-06.03
-
-M00-06.01 established the lower-privilege trust boundary. M00-06.02 made runtime trap-stack ownership uniform and proved the first one-way M->S transition. M00-06.03 closed the first controlled S->M->S ECALL round trip.
 
 Accepted runtime stack ownership:
 
@@ -228,69 +226,91 @@ S probe stack
     supervisor payload
 ```
 
-Runtime trap entry saves interrupted x2/sp as a value, rejects unsupported nested traps, switches to the per-hart trusted trap stack, constructs the TrapFrame there, dispatches, restores the interrupted x2, and returns with `mret`.
+M00-06.03 proves the positive S->M->S ECALL path. M00-06.04 deliberately sets S-mode `sp = 0xdeadbeefdeadbeef` immediately before ECALL and proves the saved hostile value is never used as privileged TrapFrame storage. The TrapFrame remains aligned and entirely inside the current hart's trusted M trap stack. The probe then removes `mscratch -> HartLocal` and proves a second lower-origin ECALL enters the register-only fail-closed path rather than returning or dereferencing untrusted storage.
 
-The M00-06.03 S-mode ECALL proof validates before mutating the saved return context:
-
-```text
-mcause == 9
-mstatus.MPP == S
-mepc == expected ECALL site
-saved sp belongs to S probe stack
-saved gp/a0/a7 match known S markers
-TrapFrame is aligned and entirely inside current hart's trusted M trap stack
-trap_active == 1
-```
-
-Only after all validation passes does the probe handler advance saved `mepc` by four bytes. Common restore then returns to S, where the payload verifies restored `sp/gp/a0/a7` before printing PASS. The ECALL handler is compile-time scoped to the M00-06.03 probe and is not a general syscall ABI.
-
-Machine-checkable result:
+Machine-checkable M00-06.04 result:
 
 ```text
-M00_06_03_ECALL_ARMED: PASS
-M00_06_03_SUPERVISOR_ENTRY: PASS
-M00_06_03_SUPERVISOR_ECALL_RETURN: PASS
-M00-06.03 supervisor ECALL round trip: PASS
+M00_06_04_BOUNDARY_ARMED: PASS
+M00_06_04_HOSTILE_SP_ENTRY: PASS
+M00_06_04_HOSTILE_SP_RETURN: PASS
+M00_06_04_NO_ANCHOR_ARMED: PASS
+M00-06.04 hostile lower-privilege boundary: PASS
 ```
 
-CI evidence: GitHub Actions run `31582257350` passed formatting, build, all prior regressions, M00-06.02, and the M00-06.03 round trip.
+CI evidence: GitHub Actions run `31664329150` passed formatting, build, all prior TrapFrame/recoverable/timer/Kernel Print regressions, M00-05 population tests, M00-06.02, M00-06.03, and M00-06.04.
 
-### ACTIVE submilestone — M00-06.04 hostile lower-privilege stack / boundary acceptance
+Design record: `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`.
 
-Next proof:
+### Recorded limitations
 
 ```text
-hostile/invalid S sp
-    -> trap entry must never use it as privileged storage
-    -> trusted HartLocal anchor selects the M trap stack
-    -> unexpected privilege/anchor states fail closed
-    -> old M/S transition regressions remain green
-    -> close M00-06 only after hostile-path evidence is machine-checkable
+satp remains bare
+probe PMP is permissive and unlocked
+no S-mode trap delegation yet
+no production syscall ABI
+no U-mode service isolation
+no nested M-level trap support
 ```
 
-The M00-06 design and acceptance contract is recorded in `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`.
+---
 
-### Explicit non-goals for M00-06
+## NOW — M00-07 Memory foundation
+
+### Objective
+
+Implement the first end-to-end firmware memory lifecycle rather than only an allocator:
 
 ```text
-Sv39/page tables
-physical allocator
-scheduler/tasks
-U-mode applications
-PMP service isolation
-ArchHV / HS / VS
-full syscall ABI
-nested M-level trap support
+flash / PNOR-equivalent image
+    -> resident Jixia Base
+    -> contained EarlyMemory domain
+    -> VMM/PageManager capable of flash-backed demand paging before DDR
+    -> fake DDR discovery/training/address-map state machine
+    -> DDR/System RAM becomes online
+    -> contained -> mainstore transition preserving firmware address identity
+    -> post-DDR flash-backed paging into DDR
+    -> retire contained EarlyMemory
 ```
+
+The first QEMU version models the semantics of cache-contained memory; it does not pretend QEMU provides POWER-style L3 backing-cache hardware. The software abstraction is `EarlyMemory`/contained memory so a later SimSoc backend can be Boot SRAM, L2 CAR, L3 backing cache, or another implementation.
+
+### Primary invariant
+
+```text
+firmware object/address identity
+        !=
+current storage medium
+```
+
+The desired transition preserves stable firmware VA/PA identity where the platform model allows it. POWER Hostboot is the architectural reference: establish real DDR decode first, then stop execution, cast out/purge contained cache state into DDR at the same real addresses, exit contained mode, resume, and extend the allocator/VMM into remaining mainstore.
+
+For QEMU v0, the same contract may be implemented behaviorally; the upper Jixia layers must not depend on whether the contained backend is simulated or a real cache mode.
+
+### First acceptance target
+
+```text
+[ ] firmware image is sourced from a flash/PNOR-equivalent path rather than treated as ordinary DDR-resident payload
+[ ] only resident Base components are required before DDR
+[ ] pageable Extended content remains in flash
+[ ] a pre-DDR page fault is serviced from flash into EarlyMemory
+[ ] fake DDR lifecycle reaches ONLINE only after explicit training/layout/decode stages
+[ ] DDR System RAM is added to the resource/allocator view only after ONLINE
+[ ] contained -> mainstore transition preserves live firmware state without pointer-fixup semantics
+[ ] a post-DDR page fault is serviced from flash into DDR
+[ ] EarlyMemory retirement is explicit and machine-checkable
+[ ] existing M00-02..M00-06 regressions remain green
+```
+
+Research checkpoint: `docs/JIXIA_MEMORY_MANAGEMENT_RESEARCH.md`.
 
 ---
 
 ## NEXT queue
 
-1. finish `M00-06.04 hostile lower-privilege stack and M00-06 closure`
-2. `M00-07 Early physical allocator`
-3. `M00-08 Structured event and trace ABI`
-4. `M00-09 Automated QEMU test harness`
+1. finish `M00-07 Memory foundation`
+2. `M00-08 Structured event and trace ABI`
+3. `M00-09 Automated QEMU test harness`
 
 Only one architectural milestone is ACTIVE at a time.
 
@@ -333,6 +353,16 @@ Do not build a long chain of completed milestone branches while leaving `main` s
 ---
 
 ## Progress history
+
+### 2026-08-13 — M00-06.04 accepted; M00-06 closed
+
+- Added a hostile lower-privilege x2/sp probe using `0xdeadbeefdeadbeef` immediately before S-mode ECALL.
+- Proved M trap entry preserves interrupted x2 only as a value and constructs the TrapFrame entirely on the trusted per-hart M trap stack.
+- Proved S-mode receives the hostile x2/sp and selected context registers unchanged after the controlled round trip.
+- Removed the trusted `mscratch -> HartLocal` anchor for a second S-mode ECALL and proved the existing no-anchor lower-origin path fails closed without returning.
+- Added `scripts/test-m00-06-04-privilege-boundary.sh` and CI coverage.
+- GitHub Actions run `31664329150` passed the complete regression chain.
+- M00-06 is closed; M00-07 Memory foundation is the single ACTIVE milestone.
 
 ### 2026-08-12 — M00-06.03 accepted
 

@@ -89,6 +89,10 @@ jobs:
         run: |
           bash scripts/test-m00-06-03-supervisor-transition.sh
 
+      - name: M00-06.04 hostile lower-privilege boundary
+        run: |
+          bash scripts/test-m00-06-04-privilege-boundary.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,3 +110,4 @@ jobs:
             build/clion-debug/logs/
             build/m00-06-02/
             build/m00-06-03/
+            build/m00-06-04/

@@ -1,15 +1,15 @@
 # Jixia M00-06 Privilege Transition Foundation
 
-**Status:** ACTIVE  
-**Stable baseline:** `main`  
-**Umbrella branch:** `milestone/m00-06-privilege-transition`  
-**Accepted through:** `M00-06.03 S->M ECALL round trip`
+**Status:** DONE
+**Stable baseline:** `main` after M00-06.04 squash integration
+**Umbrella branch:** `milestone/m00-06-privilege-transition`
+**Accepted through:** `M00-06.04 hostile lower-privilege boundary acceptance`
 
 ## 1. Objective
 
 M00-06 establishes the first controlled lower-privilege execution path in Mozi without mixing in paging, scheduling, allocation, or service isolation.
 
-The first complete state machine is:
+The completed state machine is:
 
 ```text
 M-mode Mozi
@@ -21,15 +21,16 @@ M-mode Mozi
     -> S-mode payload
     -> ecall / controlled trap
     -> M-mode trusted trap entry
+    -> preserve interrupted lower-privilege registers as values
+    -> construct TrapFrame only on trusted per-hart M storage
     -> prove previous privilege and saved context
     -> controlled return to S
+    -> hostile/no-anchor negative-path acceptance
 ```
 
 The architectural boundary is not merely the `mret` instruction. The critical security invariant is that M-mode must not trust an interrupted stack merely because the hart has already entered M privilege.
 
 ## 2. Submilestone gates
-
-M00-06 is split into four acceptance gates. Only one submilestone is ACTIVE at a time.
 
 ### M00-06.01 — Trusted M-mode trap entry — DONE
 
@@ -98,7 +99,7 @@ Accepted invariants:
 
 ```text
 [x] a live normal M-mode call stack is not used as runtime TrapFrame storage
-[x] every runtime M-level trap uses a dedicated per-hart trusted trap stack
+[x] every runtime M-level trap uses a dedicated per-hart trusted M trap stack
 [x] trap entry saves interrupted x2/sp as a value before switching stacks
 [x] M-mode never dereferences interrupted S/U stack storage during trap entry
 [x] M-origin TrapFrame/recoverable/timer semantics are preserved after moving frame storage
@@ -201,27 +202,66 @@ M00_06_03_SUPERVISOR_ECALL_RETURN: PASS
 M00-06.03 supervisor ECALL round trip: PASS
 ```
 
-The acceptance script also requires the completed SMP, Kernel Print, recoverable-trap, and machine-timer regressions and rejects fatal-trap or explicit M00-06.03 FAIL output before accepting the round trip.
+### M00-06.04 — Hostile lower-privilege stack and full acceptance — DONE
 
-### M00-06.04 — Hostile lower-privilege stack and full acceptance — NEXT
+Development branch: `milestone/m00-06-04-privilege-boundary-acceptance`.
 
-Branch: `milestone/m00-06-04-privilege-boundary-acceptance`.
+M00-06.04 turns the earlier positive-path trust argument into a negative-path proof.
 
-Goal: prove the privilege boundary fails closed rather than merely working on the normal path.
-
-Required evidence:
+The first S-mode ECALL deliberately sets:
 
 ```text
-[ ] deliberately hostile/invalid S sp cannot redirect M-mode TrapFrame writes
-[ ] lower-origin entry still switches to trusted M storage
-[ ] unexpected privilege/anchor states fail through a controlled path
-[ ] M00-06 acceptance marker is machine-checkable
-[ ] 1/2/4-hart M00-05 population regressions still pass
-[ ] TrapFrame, recoverable trap, machine timer, and Kernel Print regressions still pass
-[ ] delegation, PMP, paging, nested-trap, and security limitations are recorded
+x2/sp = 0xdeadbeefdeadbeef
 ```
 
-M00-06 is DONE only after M00-06.04 passes and the umbrella milestone is closed in `docs/JIXIA_PROGRESS.md`.
+immediately before the trap. No stack-using instruction occurs between that write and `ecall`. M trap entry must therefore treat interrupted x2 as untrusted register state, preserve it only as a value, and build the TrapFrame on `HartLocal.trap_stack_top`.
+
+The M-side acceptance handler proves:
+
+```text
+[x] mcause is ECALL from S-mode
+[x] mstatus.MPP == S
+[x] mepc is the expected hostile-stack ECALL site
+[x] saved x2 equals the hostile marker rather than a trusted address
+[x] saved gp/a0/a7 match the expected S context
+[x] TrapFrame is aligned
+[x] the complete TrapFrame resides inside the current hart's trusted M trap stack
+[x] trap_active == 1 while the handler owns the trap stack
+```
+
+Only after validation does the probe advance `mepc`. S-mode then proves the hostile x2/sp and selected registers were restored exactly, repairs its normal S stack, and emits the return marker.
+
+The probe then intentionally removes the trusted `mscratch -> HartLocal` anchor and executes a second S-mode ECALL. Existing `trap.S` must take the lower-origin/no-anchor register-only fail-closed path. The second ECALL is accepted only if it never returns and never uses untrusted lower-privilege storage as M-mode state.
+
+Machine-checkable markers:
+
+```text
+M00_06_04_BOUNDARY_ARMED: PASS
+M00_06_04_HOSTILE_SP_ENTRY: PASS
+M00_06_04_HOSTILE_SP_RETURN: PASS
+M00_06_04_NO_ANCHOR_ARMED: PASS
+M00-06.04 hostile lower-privilege boundary: PASS
+```
+
+Acceptance command:
+
+```bash
+bash scripts/test-m00-06-04-privilege-boundary.sh
+```
+
+Accepted CI evidence:
+
+```text
+GitHub Actions run 31664329150
+format/build: PASS
+TrapFrame/recoverable trap/machine timer/Kernel Print: PASS
+M00-05 SMP population regression: PASS
+M00-06.02 supervisor transition: PASS
+M00-06.03 supervisor ECALL round trip: PASS
+M00-06.04 hostile lower-privilege boundary: PASS
+```
+
+M00-06 is therefore closed.
 
 ## 3. Trap-entry trust and stack model
 
@@ -232,7 +272,7 @@ Two questions remain independent on every M-level trap entry:
 2. What previous privilege is recorded in mstatus.MPP?
 ```
 
-However, M00-06.02 deliberately removes previous privilege from runtime stack selection. Once HartLocal exists, every runtime M-level trap uses the same trusted per-hart trap stack.
+M00-06.02 deliberately removes previous privilege from runtime stack selection. Once HartLocal exists, every runtime M-level trap uses the same trusted per-hart trap stack.
 
 Accepted policy:
 
@@ -257,11 +297,11 @@ S/U-origin trap + no HartLocal anchor
 
 `mscratch -> HartLocal` is the trusted per-hart anchor, not the stack itself.
 
-The historical M00-06.01 branch distinguished M-origin and lower-origin stack paths. M00-06.02 intentionally unifies runtime trap storage while retaining MPP for semantic origin/return decisions.
+M00-06.04 explicitly proves both the hostile interrupted-x2 case and the lower-origin/no-anchor case.
 
 ## 4. First-transition policy
 
-For the accepted M00-06.02/M00-06.03 probes:
+For the accepted M00-06.02/M00-06.03/M00-06.04 probes:
 
 ```text
 satp      = 0
@@ -275,9 +315,7 @@ pmpcfg0   = RWX + NAPOT, unlocked (probe only)
 
 This keeps the experiment focused on privilege transition rather than paging, delegation, asynchronous interaction, or real PMP isolation.
 
-The permissive PMP entry is necessary only to grant the S probe access to the firmware RAM/S stack/QEMU UART address space in this experiment. It deliberately does not claim protection between M and S. PMP-backed service ownership and isolation remain later work.
-
-The S-mode markers use direct QEMU UART access through the existing `uart_puts()` helper after the S stack is established. That access is test observability, not a supervisor console ABI.
+The permissive PMP entry grants the S probes access to firmware RAM/S stack/QEMU UART address space. It deliberately does not claim protection between M and S. PMP-backed service ownership and isolation remain later work.
 
 Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscratch` path and are not part of the current M-mode trap entry.
 
@@ -285,7 +323,7 @@ Future S-mode delegated traps will use a separate `stvec/scause/sepc/stval/sscra
 
 The transition must not create an M-mode interval in which firmware executes ordinary stack-using code on lower-privilege storage.
 
-M00-06.03 sequence:
+Completed rule:
 
 ```text
 normal M-mode C++
@@ -309,8 +347,10 @@ S ECALL
 
 M return
     common restore writes the saved S x2 value back last
-    mret returns to S after the ECALL
+    mret returns to S
 ```
+
+M00-06.04 additionally proves that the saved S x2 may be deliberately invalid without redirecting M-mode TrapFrame writes.
 
 ## 6. Nested-trap policy
 
@@ -327,27 +367,11 @@ This is deliberately stronger than silently resetting x2 to the trap-stack top a
 
 ## 7. Integration policy
 
-M00-06 is one architectural milestone with multiple accepted checkpoints.
+M00-06 is one architectural milestone with four accepted checkpoints. Development branches may contain fine-grained commits; accepted checkpoints are squashed into `main` as semantic milestones.
 
-```text
-main
-  |
-  +-- accepted M00-06.01 checkpoint
-  |
-  +-- accepted M00-06.02 checkpoint
-  |
-  +-- M00-06.03 branch from latest main
-  |       -> test/CI
-  |       -> squash accepted checkpoint into main
-  |
-  `-- M00-06.04 branch from latest main
-          -> full M00-06 acceptance
-          -> squash closure into main
-```
+M00-06.04 is the closure gate. After its accepted checkpoint is integrated, the next single ACTIVE architectural milestone is M00-07 Memory Foundation.
 
-Development branches may contain fine-grained commits. `main` keeps stable semantic checkpoints rather than debug/fixup history.
-
-## 8. Explicit non-goals
+## 8. Explicit non-goals / recorded limitations
 
 M00-06 does not add:
 
@@ -361,6 +385,8 @@ ArchHV / HS / VS
 G-stage translation
 full syscall ABI
 nested trap support
+interrupt/exception delegation to S-mode
+production syscall dispatch
 ```
 
-Those mechanisms remain later milestones.
+The probe PMP entry is intentionally permissive and unlocked. `satp` remains bare. M00-06 proves privilege crossing and trusted M-level trap storage only; it does not yet prove isolation between future services.
