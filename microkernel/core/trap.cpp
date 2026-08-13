@@ -23,6 +23,10 @@ extern "C" char __m00_06_02_supervisor_stack_top[];
 extern "C" bool jixia_m00_06_04_try_handle_supervisor_ecall(jixia::arch::riscv::TrapFrame* frame);
 #endif
 
+#ifdef JIXIA_M00_07_03_PROBE
+extern "C" bool jixia_m00_07_03_try_handle_trap(jixia::arch::riscv::TrapFrame* frame);
+#endif
+
 namespace jixia::microkernel::trap {
 
 using jixia::arch::riscv::BreakpointDecode;
@@ -209,6 +213,12 @@ void dispatch(TrapFrame& frame)
 
 #ifdef JIXIA_M00_06_04_PROBE
     if (jixia_m00_06_04_try_handle_supervisor_ecall(&frame)) {
+        return;
+    }
+#endif
+
+#ifdef JIXIA_M00_07_03_PROBE
+    if (jixia_m00_07_03_try_handle_trap(&frame)) {
         return;
     }
 #endif
