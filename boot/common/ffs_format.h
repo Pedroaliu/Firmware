@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-
 /*
  * Jixia uses the OpenPOWER FFS v1 on-flash partition-table format.
  *
@@ -55,6 +53,9 @@
 #define JIXIA_FFS_MISC_GOLDEN 0x01
 
 #ifndef __ASSEMBLER__
+
+#include <stdint.h>
+
 namespace jixia::firmware_store::ffs {
 
 struct __attribute__((packed)) OnFlashHeader {
@@ -97,4 +98,5 @@ static_assert(sizeof(OnFlashHeader) == JIXIA_FFS_HEADER_SIZE);
 static_assert(sizeof(OnFlashEntry) == JIXIA_FFS_ENTRY_SIZE);
 
 } // namespace jixia::firmware_store::ffs
+
 #endif
