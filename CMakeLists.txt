@@ -126,6 +126,7 @@ add_executable(
     microkernel/core/recoverable_trap_test.cpp
     microkernel/core/timer_interrupt_test.cpp
     microkernel/core/trap_frame_test.cpp
+    microkernel/memory/memory_lifecycle.cpp
     platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
     microkernel/arch/riscv/hart_layout.h
