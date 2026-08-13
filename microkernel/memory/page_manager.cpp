@@ -84,8 +84,11 @@ bool add_range(uintptr_t base, size_t size, BackingKind backing) {
         }
     }
 
-    if (backing == BackingKind::ddr && !memory::ddr_allocation_enabled()) {
-        return false;
+    if (backing == BackingKind::ddr) {
+        if (!memory::ddr_allocation_enabled() || memory::backing_for(base) != BackingKind::ddr ||
+            memory::backing_for(end - 1U) != BackingKind::ddr) {
+            return false;
+        }
     }
 
     g_ranges[g_range_count] = {
@@ -106,6 +109,30 @@ bool add_contained_bootstrap_pool() {
     }
 
     return add_range(base, end - base, BackingKind::contained);
+}
+
+size_t promote_backing(BackingKind from, BackingKind to) {
+    if (from == to || from == BackingKind::unavailable || to == BackingKind::unavailable) {
+        return 0U;
+    }
+
+    size_t promoted_ranges = 0U;
+
+    for (size_t index = 0U; index < g_range_count; ++index) {
+        ManagedRange& range = g_ranges[index];
+        if (range.backing != from) {
+            continue;
+        }
+
+        if (memory::backing_for(range.base) != to || memory::backing_for(range.end - 1U) != to) {
+            return 0U;
+        }
+
+        range.backing = to;
+        ++promoted_ranges;
+    }
+
+    return promoted_ranges;
 }
 
 Allocation allocate_page() {
