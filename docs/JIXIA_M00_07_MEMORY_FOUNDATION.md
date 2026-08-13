@@ -3,7 +3,7 @@
 **Status:** ACTIVE
 **Branch:** `milestone/m00-07-memory-foundation`
 **Reference model:** Hostboot cache-contained -> mainstore lifecycle, adapted to RISC-V/QEMU first and later to Jingjie/SimSoc hardware models
-**Accepted through:** `M00-07.02 explicit contained EarlyMemory state`
+**Accepted through:** `M00-07.03 pre-DDR flash-backed page fault`
 
 ## 1. Objective
 
@@ -104,7 +104,8 @@ Initial 32 MiB pflash0 layout:
 0x00000000  Stage0 XIP code
 0x00001000  JixiaFlashHeader v1
 0x00010000  Jixia Base image
-...         future Extended/pageable image
+0x00100000  Extended/pageable image
+...         future additional sections
 0x02000000  end of pflash0
 ```
 
@@ -122,7 +123,7 @@ Initial 32 MiB pflash0 layout:
 0x38 u64 extended_size
 ```
 
-The first slice sets `extended_size = 0`; the field is reserved now so later pageable content does not require replacing the image contract.
+M00-07.03 begins using the Extended fields for a real pflash-resident pageable code page.
 
 ## 5. Stage0 boundary
 
@@ -172,6 +173,8 @@ For QEMU v0, the resident Base is copied to the same firmware address range alre
 
 This deliberately models the POWER invariant rather than the physical cache mechanism.
 
+A linker-reserved, page-aligned 64 KiB bootstrap pool is allocator-owned contained memory. It is separate from resident code/data/stacks and supplies the first real Sv39 page tables and pflash-backed page-in buffer.
+
 ## 7. DDR state machine
 
 The first implementation exposes explicit stages even when their internal work is stubbed:
@@ -186,17 +189,18 @@ DDR_OFFLINE
     -> DDR_ONLINE
 ```
 
-Only after `DDR_ONLINE` may normal System RAM be added to the allocator/resource view.
+`DDR_ONLINE` means the hardware/main-memory path is operational enough to receive the contained-state castout. It does **not** immediately make normal DDR pages allocator-visible. Mainstore becomes allocator-visible only after the contained -> mainstore transition commits.
 
-The API shape should remain decomposed:
+The QEMU platform keeps named stages:
 
 ```text
-ddr_discover()
-ddr_train()
-ddr_build_topology()
-ddr_build_address_map()
-ddr_program_decode()
-ddr_online()
+ddr::discover()
+ddr::start_training()
+ddr::finish_training()
+ddr::build_topology()
+ddr::build_address_map()
+ddr::program_decode()
+ddr::online()
 ```
 
 Later Hostboot MSS-style discovery, effective configuration, grouping/interleave, PA layout, and BAR programming replace these stubs without replacing the lifecycle.
@@ -211,46 +215,62 @@ MEM_CONTAINED
     -> MEM_TRANSITIONING
     -> contained_flush/castout abstraction
     -> MEM_MAINSTORE
-    -> extend normal memory allocator/VMM
-    -> retire contained-only ownership
-    -> MEM_EARLY_RETIRED
+    -> promote existing allocator-owned contained ranges to DDR backing
+       without changing base/next/end addresses
+    -> add remaining normal DDR range
 ```
 
 On QEMU, `contained_flush/castout` is a semantic transition because the machine does not expose a POWER-style backing-cache mode. On Jingjie/SimSoc it may later become real dirty-line writeback into DDR at the same PA.
 
+The PageManager transition is deliberately a backing-label promotion, not an object move:
+
+```text
+before:
+  ManagedRange { base, next, end, backing=CONTAINED }
+
+after:
+  ManagedRange { same base, same next, same end, backing=DDR }
+```
+
+This is the software-visible proof of the POWER-style stable-address invariant.
+
 ## 9. Pageable image contract
 
-The resident Base must eventually contain everything necessary to service a page fault before DDR:
+The resident Base contains everything necessary to service the first page fault before DDR:
 
 ```text
 trap/exception entry
-VMM/page-table mechanism
-minimal physical-page allocator
-flash provider/pager
-minimal module/VFS metadata needed by the provider
+minimal Sv39 page-table mechanism
+minimal range-based physical PageManager
+resident pflash provider
 critical diagnostics
-DDR lifecycle framework
+memory lifecycle state
 ```
 
 Extended firmware remains in pflash and is not eagerly copied merely because it exists.
 
-Required pre-DDR proof:
+Accepted pre-DDR path:
 
 ```text
-access nonresident firmware VA
--> page fault
--> allocate EarlyMemory page
--> flash_read(page)
--> install mapping
--> resume faulting instruction
+S-mode JALR to unmapped VA 0x40000000
+-> instruction page fault to M-mode
+-> trusted M TrapFrame
+-> PageManager allocates contained EarlyMemory page
+-> pflash provider copies Extended page
+-> Sv39 RX mapping installed
+-> sfence.vma + fence.i
+-> saved mepc is NOT advanced
+-> mret retries original instruction fetch
+-> pageable code executes and returns magic
+-> controlled S ECALL reports completion
 ```
 
-Required post-DDR proof:
+Required post-DDR proof for M00-07.05:
 
 ```text
 access another nonresident firmware VA
 -> page fault
--> allocate DDR page
+-> allocate DDR-backed page
 -> flash_read(page)
 -> install mapping
 -> resume faulting instruction
@@ -291,7 +311,7 @@ M00-07.01 pflash Stage0 -> resident Base: PASS
 [x] DDR lifecycle begins in DDR_OFFLINE
 [x] the first 8 MiB firmware window reports contained backing semantics
 [x] addresses immediately outside the contained window are unavailable pre-DDR
-[x] normal DDR allocation remains disabled before DDR_ONLINE
+[x] normal DDR allocation remains disabled before DDR_ONLINE/mainstore transition
 ```
 
 Accepted evidence:
@@ -306,27 +326,54 @@ M00-07.02 explicit contained EarlyMemory state: PASS
 
 The 8 MiB value is a QEMU-v0 semantic contained capacity, not a claim that QEMU provides an 8 MiB L2/L3 cache. The software contract remains `EarlyMemory`/contained backing.
 
-### M00-07.03 — pre-DDR flash-backed page fault — ACTIVE
+### M00-07.03 — pre-DDR flash-backed page fault — DONE
 
 ```text
-[ ] resident pager/provider exists
-[ ] one Extended page is deliberately absent
-[ ] fault fills an EarlyMemory page from pflash and resumes
+[x] resident pflash provider exists and consumes the same JixiaFlashHeader v1
+[x] minimal range-based PageManager owns an explicit contained bootstrap pool
+[x] minimal Sv39 page-table walker allocates its own tables from PageManager
+[x] one executable Extended page remains only in pflash
+[x] S-mode performs a real instruction fetch from unmapped VA 0x40000000
+[x] M-mode receives a real instruction-page-fault TrapFrame
+[x] fault handling verifies DDR is still OFFLINE and allocator-invisible
+[x] PageManager supplies a contained EarlyMemory page
+[x] pflash provider fills the page and Sv39 installs an RX mapping
+[x] mret retries the same saved mepc rather than skipping the faulting fetch
+[x] pageable code executes and returns the expected magic value
 ```
 
-### M00-07.04 — fake DDR lifecycle and mainstore transition
+Accepted evidence:
 
 ```text
-[ ] explicit DDR state machine reaches ONLINE
-[ ] address/decode stages are visible even while stubbed
-[ ] contained -> mainstore transition preserves live firmware identity
-[ ] remaining DDR memory is added only after transition
+GitHub Actions run 31666809917
+M00_07_PRE_DDR_PAGING_ARMED: PASS
+M00_07_PRE_DDR_PAGE_FAULT: PASS
+M00_07_PRE_DDR_FLASH_READ: PASS
+M00_07_PRE_DDR_BACKING_EARLY: PASS
+M00_07_PRE_DDR_PAGING_RESUME: PASS
+M00-07.03 pre-DDR flash-backed paging: PASS
+```
+
+This is the first Jixia proof that a pageable firmware component can remain in flash and be faulted into temporary/contained memory before DDR is available.
+
+### M00-07.04 — fake DDR lifecycle and mainstore transition — ACTIVE
+
+```text
+[ ] fake platform walks discovery -> training -> topology -> PA map -> decode -> online
+[ ] DDR remains allocator-invisible even after hardware state reaches ONLINE
+[ ] mainstore transition has an explicit contained flush/castout commit point
+[ ] a live pre-DDR object keeps the same pointer/PA and contents across transition
+[ ] firmware-visible backing changes CONTAINED -> DDR only when transition commits
+[ ] PageManager promotes existing contained ranges without moving them
+[ ] remaining mainstore is added only after transition
+[ ] post-transition allocations are DDR-backed
 ```
 
 ### M00-07.05 — post-DDR paging and EarlyMemory retirement
 
 ```text
 [ ] second Extended page faults from pflash into DDR
+[ ] pre-DDR page-table and allocator state survives the backing transition
 [ ] contained-only ownership is retired explicitly
 [ ] final invariant checker reports no stale EarlyMemory ownership
 [ ] complete M00-07 acceptance is machine-checkable
