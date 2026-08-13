@@ -38,6 +38,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_07_04_PROBE
+    "Boot the M00-07.04 fake DDR and contained-to-mainstore transition probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -133,6 +139,7 @@ add_executable(
     microkernel/core/trap.cpp
     microkernel/core/privilege_boundary_test.cpp
     microkernel/core/pre_ddr_paging_test.cpp
+    microkernel/core/mainstore_transition_test.cpp
     microkernel/core/timer.cpp
     microkernel/core/smp_timer_test.cpp
     microkernel/core/kernel_print_test.cpp
@@ -142,6 +149,8 @@ add_executable(
     microkernel/memory/memory_lifecycle.cpp
     microkernel/memory/page_manager.cpp
     microkernel/memory/flash_provider.cpp
+    platform/qemu_virt/contained_memory.cpp
+    platform/qemu_virt/ddr.cpp
     platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
     microkernel/arch/riscv/hart_layout.h
@@ -190,6 +199,14 @@ if(JIXIA_M00_07_03_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_07_03_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_07_04_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_07_04_PROBE=1
     )
 endif()
 
