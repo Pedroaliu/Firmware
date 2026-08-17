@@ -4,8 +4,10 @@
 
 This is the canonical execution plan for Jixia's current one-person development mode.
 
-**Last updated:** 2026-08-17  
-**Latest completed milestone:** M00-07 Pre-DDR Memory Foundation  
+**Last updated:** 2026-08-17
+
+**Latest completed milestone:** M00-07 Pre-DDR Memory Foundation
+
 **Immediate next step:** Hostboot execution-flow research gate before freezing the next implementation milestone
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
@@ -22,7 +24,7 @@ one implementation milestone or architecture research gate
     -> retain old regressions
     -> update design/progress records
     -> integrate accepted checkpoint into main
-    -> choose the next milestone
+    -> choose next milestone
 ```
 
 At any time:
@@ -36,7 +38,7 @@ FROZEN    work blocked by architectural prerequisites
 
 ## 2. Reference discipline
 
-For firmware lifecycle questions, the order is:
+For firmware lifecycle questions, use:
 
 ```text
 Hostboot whole-system flow
@@ -95,31 +97,7 @@ DONE  M00-06  Privilege transition foundation
 DONE  M00-07  Pre-DDR Memory Foundation
 ```
 
-### M00-05 established
-
-```text
-private per-hart stack
-HartId != dense HartIndex
-boot-hart-only global initialization
-release/acquire rendezvous
-HartLocal
-mscratch -> HartLocal
-per-hart timer state/compare
-bounded FDT population discovery
-```
-
-### M00-06 established
-
-```text
-trusted per-hart M trap stack
-lower-origin sp is untrusted data, not privileged storage
-controlled M->S
-controlled S->M->S ECALL
-hostile lower-privilege stack proof
-missing trusted anchor fails closed
-```
-
-### M00-07 established
+M00-07 established:
 
 ```text
 pflash/PNOR-equivalent image
@@ -140,7 +118,7 @@ M00-07 does not claim a production post-DDR firmware flow. See `docs/JIXIA_M00_0
 
 ## 5. NOW — Hostboot service/InitService research gate
 
-Before creating the next implementation milestone, trace Hostboot from Base/kernel entry to the first real firmware services and memory isteps.
+Before creating the next implementation milestone, trace Hostboot from Base/kernel entry to real firmware services and memory isteps.
 
 Required study path:
 
@@ -187,7 +165,7 @@ minimal scheduler
 service address space
 message/IPC foundation
 service lifecycle
-VFS/module load boundary
+VFS/module-load boundary
 initial InitService
 minimum capability/object ownership
 ```
@@ -237,7 +215,7 @@ new page faults allocate DDR
 real contained backend is retired correctly on Jingjie/hardware
 ```
 
-Do not re-create the VMM/page tables after DDR merely to make the test pass; the point is continuity across the transition.
+Do not re-create VMM/page tables after DDR merely to make the test pass; the point is continuity across the transition.
 
 ## 8. Management Complex roadmap boundary
 
@@ -261,7 +239,7 @@ Runtime/OOB:
 
 Heavy DDR training, large HWP libraries, rich attribute databases, and complex boot orchestration remain host firmware responsibilities unless a later hardware dependency proves otherwise.
 
-This keeps the Management Complex SRAM and software footprint proportional to its always-on management role.
+This keeps Management Complex SRAM and software footprint proportional to its always-on management role.
 
 ## 9. Planned later foundations
 

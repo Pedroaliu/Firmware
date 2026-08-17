@@ -9,12 +9,12 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation`
-- **Current implementation branch during closure:** `milestone/m00-07-memory-foundation`
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, or any single existing firmware stack.
 
-Canonical live status: `docs/JIXIA_PROGRESS.md`.  
+Canonical live status: `docs/JIXIA_PROGRESS.md`.
+
 Canonical execution plan: `docs/JIXIA_SOLO_ROADMAP.md`.
 
 ## 2. Architecture reference priority
@@ -35,7 +35,7 @@ Whole-system firmware boot flow is Hostboot-first.
    - RAS/PRD integration patterns
 
 2. Jixia platform requirements
-   determine where Jixia intentionally differs.
+   determine where Jixia intentionally differs
 
 3. seL4 and related microkernels
    secondary reference for:
@@ -53,7 +53,7 @@ Whole-system firmware boot flow is Hostboot-first.
    - standardized package/service boundaries
 
 5. Linux/other operating systems
-   implementation and comparison reference where applicable.
+   implementation and comparison reference where applicable
 ```
 
 Do not invent a generic microkernel boot flow first and retrofit firmware behavior later. For boot, memory, PNOR, istep/HWP, runtime transition, and RAS lifecycle questions, inspect Hostboot first.
@@ -67,10 +67,10 @@ Preferred responsibility split:
 ```text
 Boot Engine / minimum prerequisite logic
     -> make the host safely executable
-    -> root of trust / secure load prerequisites
+    -> root of trust / secure-load prerequisites
     -> reset release
     -> minimum power and PLL/clock prerequisites
-    -> minimum fabric/pervasive setup needed to release the host
+    -> minimum fabric/pervasive setup needed to release host
 
 Host Jixia firmware
     -> make the platform operational
@@ -84,7 +84,7 @@ Host Jixia firmware
     -> PCIe/CXL and later platform initialization
 
 Management Complex
-    -> keep the platform manageable even when the host is unhealthy
+    -> keep the platform manageable even when host is unhealthy
     -> always-on runtime and out-of-band control
     -> RAS event aggregation and monitoring
     -> watchdog and recovery coordination
@@ -156,7 +156,7 @@ MULTI_LPAR
     Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
-Do not prematurely map Hostboot's logical kernel/user split directly onto RISC-V M/S/U privilege levels. M00-06/07 S-mode code is currently an acceptance context, not the final service model. The production M/S/U placement will be decided after studying the Hostboot kernel/VFS/InitService startup path and defining Jixia service isolation requirements.
+Do not prematurely map Hostboot's logical kernel/user split directly onto RISC-V M/S/U privilege levels. M00-06/07 S-mode code is currently an acceptance context, not the final service model. Production M/S/U placement will be decided after studying the Hostboot kernel/VFS/InitService startup path and defining Jixia service isolation requirements.
 
 ## 7. Architectural baseline
 
@@ -245,11 +245,13 @@ no mainstore fallback to contained allocation
 
 Design record: `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`.
 
+Primary full-regression evidence: GitHub Actions run `32005255564`.
+
 M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainstore code is a mechanism prototype used to establish invariants for the later Hostboot-style flow.
 
 ## 9. Immediate next architecture research gate
 
-Before the next major implementation milestone, study the Hostboot startup chain end-to-end:
+Before the next major implementation milestone, study Hostboot startup end-to-end:
 
 ```text
 Hostboot Base/kernel entry
@@ -270,9 +272,9 @@ Questions to settle before implementing Jixia services:
 - When does Hostboot first leave pure kernel/bootstrap execution and start user/service tasks?
 - Which pieces must remain resident before DDR?
 - How do VFS/PNOR page faults block and resume a task/provider?
-- What is the exact ownership boundary between InitService, HWP/platform code, and kernel VMM mechanisms?
-- What RISC-V M/S/U mapping best preserves Hostboot-style flow while improving protection with capability/isolation ideas?
-- At what exact point should Jixia host-driven DDR initialization occur?
+- What is the ownership boundary between InitService, HWP/platform code, and kernel VMM mechanisms?
+- What RISC-V M/S/U mapping best preserves Hostboot-style flow while improving protection?
+- At what exact point should host-driven DDR initialization occur?
 
 Only after this research gate should the next service/InitService implementation milestone be frozen.
 
