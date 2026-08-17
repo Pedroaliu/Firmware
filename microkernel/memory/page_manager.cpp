@@ -88,7 +88,7 @@ bool add_range(uintptr_t base, size_t size, BackingKind backing) {
         if (memory::backing_for(base) != BackingKind::ddr ||
             memory::backing_for(end - 1U) != BackingKind::ddr) {
             return false;
-            }
+        }
     }
 
     g_ranges[g_range_count] = {
@@ -157,10 +157,7 @@ Allocation allocate_page() {
         return allocate_from(BackingKind::contained);
     }
 
-    return {
-        .physical_address = 0U,
-        .backing = BackingKind::unavailable,
-    };
+    return {.physical_address = 0U, .backing = BackingKind::unavailable};
 }
 
 size_t remaining_pages(BackingKind backing) {

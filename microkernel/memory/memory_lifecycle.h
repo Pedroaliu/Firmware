@@ -18,7 +18,6 @@ enum class MemoryDomain : uint8_t {
     contained,
     transitioning,
     mainstore,
-    early_retired,
 };
 
 /**
@@ -66,7 +65,7 @@ void initialize_contained();
  */
 [[nodiscard]] BackingKind backing_for(uintptr_t physical_address);
 
-/** Normal DDR pages remain allocator-invisible until mainstore transition ends. */
+/** Normal DDR pages remain allocator-invisible until explicitly published. */
 [[nodiscard]] bool ddr_allocation_enabled();
 
 /** M00-07.02 invariant checker used by the machine acceptance probe. */
@@ -83,7 +82,8 @@ void initialize_contained();
 /**
  * Mainstore transition is separate from DDR hardware becoming operational.
  * This mirrors Hostboot's ordering: make memory a valid castout target first,
- * then stop/flush/leave contained mode, then expose normal mainstore pages.
+ * then stop/flush/leave contained mode, prepare allocator metadata, and only
+ * then publish normal mainstore allocation.
  */
 [[nodiscard]] bool begin_mainstore_transition();
 [[nodiscard]] bool mark_contained_flush_complete();

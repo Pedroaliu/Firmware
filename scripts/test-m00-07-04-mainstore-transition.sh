@@ -128,6 +128,7 @@ for required_marker in \
     "M00_07_DDR_ONLINE: PASS" \
     "M00_07_CONTAINED_FLUSH: PASS" \
     "M00_07_STABLE_ADDRESS: PASS" \
+    "M00_07_MAINSTORE_ALLOCATOR_GATED: PASS" \
     "M00_07_MAINSTORE_TRANSITION: PASS" \
     "M00_07_MAINSTORE_EXTEND: PASS" \
     "M00-07.04 fake DDR lifecycle and mainstore transition: PASS"

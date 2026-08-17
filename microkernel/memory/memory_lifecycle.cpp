@@ -82,9 +82,8 @@ Snapshot snapshot() {
 }
 
 BackingKind backing_for(uintptr_t physical_address) {
-    if ((g_state.domain == MemoryDomain::mainstore ||
-         g_state.domain == MemoryDomain::early_retired) &&
-        g_state.ddr == DdrState::online && contains(g_state.ddr_range, physical_address)) {
+    if (g_state.domain == MemoryDomain::mainstore && g_state.ddr == DdrState::online &&
+        contains(g_state.ddr_range, physical_address)) {
         return BackingKind::ddr;
     }
 
@@ -218,12 +217,10 @@ bool complete_mainstore_transition() {
 }
 
 bool enable_mainstore_allocation() {
-    if (g_state.domain != MemoryDomain::mainstore ||
-        g_state.ddr != DdrState::online ||
-        !g_state.contained_flush_complete ||
-        g_state.ddr_allocation_enabled) {
+    if (g_state.domain != MemoryDomain::mainstore || g_state.ddr != DdrState::online ||
+        !g_state.contained_flush_complete || g_state.ddr_allocation_enabled) {
         return false;
-        }
+    }
 
     g_state.ddr_allocation_enabled = true;
     return true;
@@ -259,8 +256,6 @@ const char* domain_name(MemoryDomain domain) {
         return "TRANSITIONING";
     case MemoryDomain::mainstore:
         return "MAINSTORE";
-    case MemoryDomain::early_retired:
-        return "EARLY_RETIRED";
     }
 
     return "UNKNOWN";
