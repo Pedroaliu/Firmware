@@ -1,33 +1,71 @@
-# Jixia M00-07 Memory Foundation
+# Jixia M00-07 Pre-DDR Memory Foundation
 
-**Status:** ACTIVE
-**Branch:** `milestone/m00-07-memory-foundation`
-**Reference model:** Hostboot cache-contained -> mainstore lifecycle, adapted to RISC-V/QEMU first and later to Jingjie/SimSoc hardware models
-**Accepted through:** `M00-07.03 pre-DDR flash-backed page fault`
+**Status:** DONE  
+**Branch:** `milestone/m00-07-memory-foundation`  
+**Reference model:** IBM Hostboot cache-contained firmware lifecycle, adapted to RISC-V/QEMU  
+**Accepted scope:** pre-DDR memory foundation plus a contained-to-mainstore mechanism prototype  
+**Accepted through:** `M00-07.04 mainstore transition mechanism prototype`
 
-## 1. Objective
+## 1. Milestone boundary
 
-M00-07 is not an allocator milestone. It establishes the first end-to-end firmware memory lifecycle:
+M00-07 answers one primary question:
+
+> How can Jixia boot, allocate memory, construct page tables, and demand-page firmware from PNOR before normal DDR/mainstore is available?
+
+The accepted path is:
 
 ```text
-QEMU pflash / PNOR-equivalent
-        -> tiny XIP Stage0
-        -> resident Jixia Base image
+QEMU pflash / PNOR-equivalent image
+        -> XIP Stage0
+        -> FFS partition discovery
+        -> resident JXBASE
         -> contained EarlyMemory domain
-        -> VMM/PageManager usable before DDR
-        -> flash-backed pre-DDR page fault
-        -> explicit DDR discovery/training/layout/decode lifecycle
-        -> DDR online
-        -> contained -> mainstore transition
-        -> flash-backed post-DDR page fault
-        -> retire EarlyMemory
+        -> 4 KiB PageManager
+        -> Sv39 page tables from EarlyMemory
+        -> JXEXT remains in pflash
+        -> real instruction page fault
+        -> FlashProvider fills an EarlyMemory page
+        -> install RX PTE
+        -> retry the faulting instruction
 ```
 
-The first implementation deliberately keeps DDR training and hardware decode as stubs while making the lifecycle and state transitions real and machine-checkable.
+M00-07.04 additionally proves the software mechanism required for a future Hostboot-style exit-contained transition:
 
-## 2. Architectural invariant
+```text
+DDR lifecycle prototype
+        -> DDR ONLINE
+        -> contained flush/castout point
+        -> MAINSTORE semantic commit
+        -> PageManager backing promotion
+        -> remaining DDR registration
+        -> allocator publication LAST
+```
 
-The primary M00-07 invariant is:
+M00-07 intentionally stops here. It does **not** claim that the final Jixia boot flow already initializes DDR from this test path.
+
+## 2. Architecture reference rule
+
+Jixia firmware boot flow uses Hostboot as its primary reference.
+
+```text
+Hostboot
+    -> primary reference for IPL flow, InitService/istep, PNOR/VFS,
+       memory initialization, exit-contained, and mainstore lifecycle
+
+seL4 and related microkernels
+    -> secondary reference for protection, capability, address-space,
+       service isolation, and kernel/service mechanism design
+
+NXP firmware frameworks
+    -> secondary reference for component packaging, manifests,
+       dependency declaration, and standardized component boundaries
+```
+
+Therefore M00-07.04's direct test-driven DDR sequence is a mechanism prototype only. A later milestone will first establish a Hostboot-style service execution model and InitService/istep control flow; real host-driven DDR initialization and post-DDR paging will be attached to that flow.
+
+## 3. Primary invariant
+
+The central M00-07 invariant is:
 
 ```text
 firmware object/address identity
@@ -35,149 +73,184 @@ firmware object/address identity
 current backing/storage medium
 ```
 
-Jixia must not require UEFI/PEI-style global pointer fixups merely because the early-memory backing changes.
-
-The desired model is:
+For the QEMU semantic model:
 
 ```text
-same firmware VA/PA identity
+same firmware physical address
           |
-          +-- pre-DDR  -> contained EarlyMemory backing
+          +-- CONTAINED -> EarlyMemory semantics
           |
-          `-- post-DDR -> normal DDR backing
+          `-- MAINSTORE -> DDR semantics
 ```
 
-On a future SimSoc implementation with a real cache-contained mode, the strongest form is:
+No PEI-style global pointer fixup is required merely because the memory backing changes.
+
+QEMU does not provide a POWER-style L3 backing-cache mode. The implementation therefore proves the software-visible lifecycle contract, not literal cache-line migration hardware.
+
+A future Jingjie/SimSoc or real-platform backend may implement:
 
 ```text
 same PA
   |
-  +-- contained mode -> L2/L3/cache backing
+  +-- contained mode -> boot SRAM / CAR / backing cache
   |
-  `-- normal mode    -> DDR backing
+  `-- normal mode    -> DDR
 
-transition:
-DDR decode valid
--> stop host execution
--> route castout to memory
--> flush/purge contained cache
+DDR viable
+-> quiesce host execution
+-> route castout correctly
+-> clean/cast out dirty contained state
 -> disable contained mode
--> resume host execution
+-> resume at the same firmware identities
 ```
 
-The QEMU model is behavioral. It must preserve the same software contract without pretending QEMU provides POWER-style cache backing hardware.
+## 4. PNOR image and FFS contract
 
-## 3. QEMU virt facts used by M00-07
+M00-07 no longer uses a private fixed Base/Extended flash header. The accepted image uses an OpenPOWER-compatible FFS v1 partition table.
 
-Current upstream QEMU `virt` provides two CFI pflash windows in a 64 MiB region beginning at `0x20000000`; each pflash is 32 MiB. DRAM begins at `0x80000000`.
-
-Upstream source references:
+QEMU pflash0 is a 32 MiB image. The current manifest is `pnor/qemu_virt.toml`:
 
 ```text
-QEMU hw/riscv/virt.c
-  VIRT_FLASH = 0x20000000, size 0x04000000
-  VIRT_DRAM  = 0x80000000
-
-QEMU docs/system/riscv/virt.rst
-  pflash images must be exactly 32 MiB
-  TCG may boot M-mode firmware from pflash0 with -bios none
-
-QEMU hw/riscv/virt.c::virt_machine_done()
-  pflash0 + -bios none + TCG changes reset jump target to VIRT_FLASH.base
-
-QEMU hw/riscv/boot.c::riscv_setup_rom_reset_vec()
-  reset ROM supplies:
-      a0 = mhartid
-      a1 = generated FDT load address
-  then jumps to the selected start address
+0x00000000              BOOT0, fixed 4 KiB XIP Stage0
+0x00001000              FFS TOC bootstrap location
+0x00010000 and later    FFS-managed data area
+                        JXBASE
+                        optional JXEXT
+...
+0x02000000              end of pflash0
 ```
 
-Therefore the first M00-07 boot path can execute Stage0 directly from pflash while preserving the existing Jixia `(a0=hartid, a1=dtb)` handoff contract.
-
-## 4. Firmware image model
-
-M00-07 introduces a small explicit flash image contract instead of treating the complete firmware as an opaque RAM payload.
-
-Initial 32 MiB pflash0 layout:
+The important contract is identity, not a fixed JXBASE offset:
 
 ```text
-0x00000000  Stage0 XIP code
-0x00001000  JixiaFlashHeader v1
-0x00010000  Jixia Base image
-0x00100000  Extended/pageable image
-...         future additional sections
-0x02000000  end of pflash0
+Stage0
+  knows the FFS TOC bootstrap location
+        -> validates/reads FFS
+        -> finds partition "JXBASE"
+        -> copies only actual Base bytes
+        -> preserves a0=hartid and a1=DTB
+        -> jumps to Base entry
 ```
 
-`JixiaFlashHeader v1` is 64 bytes:
+The resident firmware-side FFS parser is reused by `FlashProvider` to locate `JXEXT` for demand paging.
+
+The partition model currently includes:
 
 ```text
-0x00 u64 magic
-0x08 u32 version
-0x0c u32 header_size
-0x10 u64 base_offset
-0x18 u64 base_size
-0x20 u64 base_load_address
-0x28 u64 base_entry
-0x30 u64 extended_offset
-0x38 u64 extended_size
+BOOT0   readonly
+JXBASE  readonly
+JXEXT   readonly, optional, 4 KiB padded/aligned
 ```
 
-M00-07.03 begins using the Extended fields for a real pflash-resident pageable code page.
+This is intentionally compatible with the later architecture rule that pageable firmware reads are backing operations, while persistent PNOR mutation is a separate privileged transaction path.
 
 ## 5. Stage0 boundary
 
-M00-07.01 Stage0 is intentionally smaller than the future complete Pangu/Boot Engine design.
-
-It owns only:
+Stage0 is intentionally small. Its accepted responsibilities are:
 
 ```text
-reset entry from QEMU mask ROM
--> disable asynchronous M-mode interruption
--> validate minimal flash header
--> copy resident Base image from pflash to contained EarlyMemory address
--> preserve a0=hartid and a1=FDT
--> jump to Base entry
+reset entry from QEMU pflash0
+-> establish deterministic early execution state
+-> inspect FFS
+-> find JXBASE
+-> copy resident Base to its linked address
+-> preserve QEMU hart/DTB handoff
+-> jump to Base
 ```
 
-It does not own:
+Stage0 does not own:
 
 ```text
-DDR policy
+DDR policy or training
 memory grouping/interleave
 NUMA policy
-allocator policy
+normal allocator policy
 VMM policy
-RAS policy
-secure boot/recovery/A-B update yet
+RAS diagnosis
+InitService/istep orchestration
 ```
 
-The first pflash acceptance is deliberately single-hart. SMP release policy belongs to the later Boot Foundation/management-complex work and must not be smuggled into the memory milestone.
+Those belong to later host firmware layers.
 
-## 6. EarlyMemory model
+## 6. EarlyMemory and allocation model
 
-Do not name the software abstraction `L2` or `L3`.
+The software abstraction is `EarlyMemory`, not `L2` or `L3`.
 
 ```text
 EarlyMemory
-  backend = SIMULATED_CONTAINED on QEMU v0
+    current QEMU backend: semantic contained window
 
-future backends:
-  BOOT_SRAM
-  L2_CAR
-  L3_BACKING_CACHE
-  simulator-defined contained memory
+future possible backends:
+    boot SRAM
+    L2 cache-as-RAM
+    L3 backing cache
+    simulator-defined contained memory
 ```
 
-For QEMU v0, the resident Base is copied to the same firmware address range already used by Jixia at `0x80000000`. QEMU physically implements that region as RAM, but Jixia must treat it as contained/early backing until the explicit DDR lifecycle reaches `DDR_ONLINE` and the contained-mode transition completes.
+QEMU v0 treats:
 
-This deliberately models the POWER invariant rather than the physical cache mechanism.
+```text
+contained = [0x80000000, 0x80800000)
+```
 
-A linker-reserved, page-aligned 64 KiB bootstrap pool is allocator-owned contained memory. It is separate from resident code/data/stacks and supplies the first real Sv39 page tables and pflash-backed page-in buffer.
+as a semantic contained domain until the explicit lifecycle transition. The physical QEMU implementation being ordinary RAM does not make DDR allocator-visible to Jixia.
 
-## 7. DDR state machine
+A linker-reserved 64 KiB, page-aligned bootstrap pool supplies the initial PageManager pages. Allocation/protection ownership uses 4 KiB pages.
 
-The first implementation exposes explicit stages even when their internal work is stubbed:
+Design rule:
+
+> 4 KiB is the unit of ownership; larger pages are a later translation optimization.
+
+The 8 MiB resident Sv39 mapping requires six 4 KiB page-table pages:
+
+```text
+1 x L2 root
+1 x L1 table
+4 x L0 tables
+= 6 pages = 24 KiB
+```
+
+The 64 KiB bootstrap pool therefore has 10 pages remaining immediately after the resident mapping is built, which is observed by the M00-07.03 probe.
+
+## 7. Pre-DDR Sv39 paging proof
+
+M00-07.03 uses S-mode only as a synthetic lower-privilege fault context. It is **not** the final Jixia user-service execution model.
+
+The reason for entering S-mode is architectural: normal M-mode instruction fetch does not use S-mode `satp` translation, so a real Sv39 instruction page fault must be generated from a lower privilege context.
+
+Accepted sequence:
+
+```text
+resident M-mode firmware
+    -> builds Sv39 root/tables from contained PageManager
+    -> installs resident mappings
+    -> enters synthetic S-mode probe
+
+S-mode JALR 0x40000000
+    -> unmapped instruction fetch
+    -> instruction page fault to M-mode
+
+M-mode pager
+    -> validates expected fault
+    -> allocates a contained EarlyMemory page
+    -> locates JXEXT through FFS
+    -> reads JXEXT page from pflash
+    -> installs Sv39 RX leaf PTE
+    -> sfence.vma
+    -> fence.i
+    -> leaves saved mepc unchanged
+    -> mret
+
+hardware retries the same instruction fetch
+    -> pageable code executes
+    -> returns expected result
+```
+
+A page fault repairs the execution environment and retries the original instruction; it does not skip the faulting instruction by incrementing `mepc`.
+
+## 8. DDR/mainstore mechanism prototype
+
+M00-07.04 exposes the following explicit fake platform stages:
 
 ```text
 DDR_OFFLINE
@@ -189,163 +262,155 @@ DDR_OFFLINE
     -> DDR_ONLINE
 ```
 
-`DDR_ONLINE` means the hardware/main-memory path is operational enough to receive the contained-state castout. It does **not** immediately make normal DDR pages allocator-visible. Mainstore becomes allocator-visible only after the contained -> mainstore transition commits.
+`build_topology()` remains an explicit platform operation even though it does not currently add another `DdrState` value.
 
-The QEMU platform keeps named stages:
+`DDR_ONLINE` means the memory path is viable enough for the transition model. It does **not** publish DDR allocation.
 
-```text
-ddr::discover()
-ddr::start_training()
-ddr::finish_training()
-ddr::build_topology()
-ddr::build_address_map()
-ddr::program_decode()
-ddr::online()
-```
-
-Later Hostboot MSS-style discovery, effective configuration, grouping/interleave, PA layout, and BAR programming replace these stubs without replacing the lifecycle.
-
-## 8. Contained -> mainstore state machine
-
-The first software contract is:
+The contained-to-mainstore mechanism is:
 
 ```text
-MEM_CONTAINED
-    -> DDR_ONLINE
-    -> MEM_TRANSITIONING
-    -> contained_flush/castout abstraction
-    -> MEM_MAINSTORE
-    -> promote existing allocator-owned contained ranges to DDR backing
-       without changing base/next/end addresses
-    -> add remaining normal DDR range
+CONTAINED + DDR ONLINE
+    -> TRANSITIONING
+    -> contained flush/castout hook
+    -> MAINSTORE semantic commit
+    -> PageManager promotes existing contained range metadata to DDR
+       without moving base/next/end
+    -> register remaining DDR range
+    -> allocation is still forbidden
+    -> enable_mainstore_allocation()
+    -> normal DDR allocation becomes visible
 ```
 
-On QEMU, `contained_flush/castout` is a semantic transition because the machine does not expose a POWER-style backing-cache mode. On Jingjie/SimSoc it may later become real dirty-line writeback into DDR at the same PA.
+The publication rule is:
 
-The PageManager transition is deliberately a backing-label promotion, not an object move:
+> Prepare everything first; publish availability last.
+
+The accepted transition deliberately separates four facts:
 
 ```text
-before:
-  ManagedRange { base, next, end, backing=CONTAINED }
-
-after:
-  ManagedRange { same base, same next, same end, backing=DDR }
+DDR hardware online
+    !=
+mainstore backing committed
+    !=
+PageManager metadata prepared
+    !=
+allocation published
 ```
 
-This is the software-visible proof of the POWER-style stable-address invariant.
+This closes a real race/consistency hole found during M00-07.04 review: the old implementation enabled DDR allocation before PageManager had promoted the contained range and registered the remaining DDR range. A concurrent allocation could then have returned stale `CONTAINED` allocator metadata while `backing_for(PA)` already reported `DDR`.
 
-## 9. Pageable image contract
-
-The resident Base contains everything necessary to service the first page fault before DDR:
+The final allocator policy is:
 
 ```text
-trap/exception entry
-minimal Sv39 page-table mechanism
-minimal range-based physical PageManager
-resident pflash provider
-critical diagnostics
-memory lifecycle state
+CONTAINED
+    -> allocate contained pages
+
+TRANSITIONING
+    -> allocation forbidden
+
+MAINSTORE, allocator gate closed
+    -> allocation forbidden
+
+MAINSTORE, allocator gate open
+    -> allocate DDR only
 ```
 
-Extended firmware remains in pflash and is not eagerly copied merely because it exists.
+There is no hidden mainstore-to-contained fallback.
 
-Accepted pre-DDR path:
+## 9. Why there is no `EARLY_RETIRED` memory domain
 
-```text
-S-mode JALR to unmapped VA 0x40000000
--> instruction page fault to M-mode
--> trusted M TrapFrame
--> PageManager allocates contained EarlyMemory page
--> pflash provider copies Extended page
--> Sv39 RX mapping installed
--> sfence.vma + fence.i
--> saved mepc is NOT advanced
--> mret retries original instruction fetch
--> pageable code executes and returns magic
--> controlled S ECALL reports completion
-```
+M00-07 initially considered an `early_retired` state. It was removed before closure.
 
-Required post-DDR proof for M00-07.05:
+`CONTAINED`, `TRANSITIONING`, and `MAINSTORE` answer:
 
-```text
-access another nonresident firmware VA
--> page fault
--> allocate DDR-backed page
--> flash_read(page)
--> install mapping
--> resume faulting instruction
-```
+> Which firmware-visible memory domain is active?
 
-## 10. M00-07 acceptance sequence
+"Early memory retired" answers a different question:
+
+> Does an old early-memory backend still have special ownership or hardware side effects?
+
+In the current QEMU stable-address model there is no additional action after PageManager backing promotion and allocator publication. Adding another `MemoryDomain` value would only record a fact without changing behavior.
+
+If a future real platform requires SRAM removal, CAR invalidation, backing-cache disable, capability revocation, or power gating, that lifecycle should be modeled separately, for example as an `EarlyMemoryState` with real side effects.
+
+## 10. Accepted submilestones
 
 ### M00-07.01 — pflash Stage0 -> resident Base — DONE
 
+Proves:
+
 ```text
-[x] 32 MiB pflash image is generated with explicit header
-[x] QEMU runs with pflash0 + -bios none
-[x] Stage0 executes XIP from 0x20000000
-[x] Stage0 validates header and copies Base to 0x80000000
-[x] existing a0/a1 handoff survives
-[x] Base enters the existing Mozi bootstrap
-[x] old M00 foundation regressions remain intact on the normal path
+[x] exact 32 MiB pflash image
+[x] QEMU pflash0 + -bios none reset path
+[x] XIP Stage0
+[x] FFS TOC parsing
+[x] JXBASE discovery by partition name
+[x] Base copy to 0x80000000
+[x] a0/a1 handoff preservation
+[x] transfer into existing Mozi bootstrap
 ```
 
-Accepted evidence:
+Primary test:
 
-```text
-GitHub Actions run 31665208312
-pflash_size=33554432
-stage0_size=255
-base_load=0x80000000
-base_entry=0x80000000
-M00_07_PFLASH_STAGE0: PASS
-M00_07_BASE_TRANSFER: PASS
-M00-07.01 pflash Stage0 -> resident Base: PASS
+```bash
+bash scripts/test-m00-07-01-pflash-stage0.sh
 ```
 
-### M00-07.02 — contained EarlyMemory state — DONE
+### M00-07.02 — explicit contained EarlyMemory — DONE
+
+Proves:
 
 ```text
-[x] explicit memory-domain state exists
-[x] Base begins in MEM_CONTAINED
-[x] DDR lifecycle begins in DDR_OFFLINE
-[x] the first 8 MiB firmware window reports contained backing semantics
-[x] addresses immediately outside the contained window are unavailable pre-DDR
-[x] normal DDR allocation remains disabled before DDR_ONLINE/mainstore transition
+[x] Base begins in CONTAINED
+[x] contained range is explicit
+[x] DDR begins OFFLINE
+[x] DDR allocation begins disabled
+[x] addresses outside the contained ownership range are unavailable to this memory lifecycle
 ```
 
-Accepted evidence:
+Primary test:
 
-```text
-GitHub Actions run 31665697206
-format/build: PASS
-M00-02..M00-06 regressions: PASS
-M00-07.01 pflash Stage0 -> resident Base: PASS
-M00-07.02 explicit contained EarlyMemory state: PASS
+```bash
+bash scripts/test-m00-07-02-contained-memory.sh
 ```
 
-The 8 MiB value is a QEMU-v0 semantic contained capacity, not a claim that QEMU provides an 8 MiB L2/L3 cache. The software contract remains `EarlyMemory`/contained backing.
-
-### M00-07.03 — pre-DDR flash-backed page fault — DONE
+Expected core evidence:
 
 ```text
-[x] resident pflash provider exists and consumes the same JixiaFlashHeader v1
-[x] minimal range-based PageManager owns an explicit contained bootstrap pool
-[x] minimal Sv39 page-table walker allocates its own tables from PageManager
-[x] one executable Extended page remains only in pflash
-[x] S-mode performs a real instruction fetch from unmapped VA 0x40000000
-[x] M-mode receives a real instruction-page-fault TrapFrame
-[x] fault handling verifies DDR is still OFFLINE and allocator-invisible
-[x] PageManager supplies a contained EarlyMemory page
-[x] pflash provider fills the page and Sv39 installs an RX mapping
-[x] mret retries the same saved mepc rather than skipping the faulting fetch
-[x] pageable code executes and returns the expected magic value
+state       : CONTAINED
+contained   : [0x80000000, 0x80800000)
+ddr         : OFFLINE
+ddr alloc   : disabled
+M00_07_CONTAINED_MEMORY: PASS
 ```
 
-Accepted evidence:
+### M00-07.03 — pre-DDR pflash-backed page fault — DONE
+
+Proves:
 
 ```text
-GitHub Actions run 31666809917
+[x] resident FFS/FlashProvider path
+[x] 4 KiB PageManager bootstrap pool
+[x] real Sv39 page tables from EarlyMemory
+[x] JXEXT remains in pflash until fault
+[x] real S-mode instruction page fault
+[x] trusted M-mode TrapFrame and pager handling
+[x] EarlyMemory page allocation
+[x] pflash -> EarlyMemory fill
+[x] RX PTE install and instruction-cache synchronization
+[x] retry of original mepc
+[x] pageable code successfully resumes
+```
+
+Primary test:
+
+```bash
+bash scripts/test-m00-07-03-pre-ddr-paging.sh
+```
+
+Expected core evidence:
+
+```text
 M00_07_PRE_DDR_PAGING_ARMED: PASS
 M00_07_PRE_DDR_PAGE_FAULT: PASS
 M00_07_PRE_DDR_FLASH_READ: PASS
@@ -354,74 +419,103 @@ M00_07_PRE_DDR_PAGING_RESUME: PASS
 M00-07.03 pre-DDR flash-backed paging: PASS
 ```
 
-This is the first Jixia proof that a pageable firmware component can remain in flash and be faulted into temporary/contained memory before DDR is available.
+### M00-07.04 — fake DDR/mainstore transition mechanism — DONE
 
-### M00-07.04 — fake DDR lifecycle and mainstore transition — ACTIVE
-
-```text
-[ ] fake platform walks discovery -> training -> topology -> PA map -> decode -> online
-[ ] DDR remains allocator-invisible even after hardware state reaches ONLINE
-[ ] mainstore transition has an explicit contained flush/castout commit point
-[ ] a live pre-DDR object keeps the same pointer/PA and contents across transition
-[ ] firmware-visible backing changes CONTAINED -> DDR only when transition commits
-[ ] PageManager promotes existing contained ranges without moving them
-[ ] remaining mainstore is added only after transition
-[ ] post-transition allocations are DDR-backed
-```
-
-### M00-07.05 — post-DDR paging and EarlyMemory retirement
+Proves:
 
 ```text
-[ ] second Extended page faults from pflash into DDR
-[ ] pre-DDR page-table and allocator state survives the backing transition
-[ ] contained-only ownership is retired explicitly
-[ ] final invariant checker reports no stale EarlyMemory ownership
-[ ] complete M00-07 acceptance is machine-checkable
+[x] named DDR discovery/training/topology/map/decode/online stages
+[x] DDR stays allocator-invisible when hardware state first reaches ONLINE
+[x] explicit contained flush/castout point
+[x] stable live object address and contents across semantic transition
+[x] existing PageManager range is promoted without moving addresses
+[x] remaining DDR is registered only after mainstore semantic commit
+[x] prepared-but-unpublished allocator window rejects allocation
+[x] explicit allocator publication happens last
+[x] post-publication allocation is DDR-backed
 ```
 
-## 11. Final M00-07 target log
+Primary test:
+
+```bash
+bash scripts/test-m00-07-04-mainstore-transition.sh
+```
+
+Expected core evidence:
 
 ```text
-[M00-07] boot source = pflash
-[FLASH] header valid
-[M00-07] resident Base transfer PASS
-
-[MEM] state = CONTAINED
-[PF] pre-DDR flash-backed fault
-[PM] backing = EARLY
-
-[DDR] discovered
-[DDR] training
-[DDR] trained
-[DDR] address map ready
-[DDR] decode committed
-[DDR] online
-
-[MEM] transition CONTAINED -> MAINSTORE
-[MEM] stable firmware identity PASS
-
-[PF] post-DDR flash-backed fault
-[PM] backing = DDR
-
-[MEM] EarlyMemory retired
-[M00-07] PASS
+M00_07_DDR_ALLOCATOR_GATED: PASS
+M00_07_DDR_DISCOVERED: PASS
+M00_07_DDR_TRAINING: PASS
+M00_07_DDR_TRAINED: PASS
+M00_07_DDR_TOPOLOGY_READY: PASS
+M00_07_DDR_ADDRESS_MAP_READY: PASS
+M00_07_DDR_DECODE_COMMITTED: PASS
+M00_07_DDR_ONLINE: PASS
+M00_07_CONTAINED_FLUSH: PASS
+M00_07_STABLE_ADDRESS: PASS
+M00_07_MAINSTORE_ALLOCATOR_GATED: PASS
+M00_07_MAINSTORE_TRANSITION: PASS
+M00_07_MAINSTORE_EXTEND: PASS
+M00-07.04 fake DDR lifecycle and mainstore transition: PASS
 ```
 
-## 12. Non-goals
+## 11. Deferred work: not M00-07.05
 
-M00-07 does not attempt to finish:
+The following work is intentionally deferred rather than treated as an unfinished M00-07.05:
 
 ```text
-real DDR PHY training
-real DIMM SPD/VPD stack
-final MSS grouping/interleave policy
-NUMA allocator policy
-buddy/slab design optimization
-CXL memory hotplug
-LPAR memory ownership
-full RAS retirement/quarantine
-secure boot signing/A-B recovery
-real L2/L3 CAR hardware in QEMU
+Hostboot kernel/user/VFS/InitService startup study
+    -> determine Jixia service execution model
+    -> establish real task/scheduler/address-space/IPC prerequisites
+    -> execute Hostboot-style InitService/istep flow
+    -> run host-owned DDR initialization/training/configuration
+    -> establish exact exit-contained/MM_EXTEND-like ordering
+    -> prove pre-DDR Sv39/page-table state survives that real transition
+    -> perform a natural post-DDR PNOR-backed fault into DDR
+    -> validate real contained-cache retirement on Jingjie/hardware
 ```
 
-Those mechanisms must fit into the lifecycle established here rather than forcing the lifecycle to be redesigned later.
+The post-DDR page fault should occur naturally while a real firmware service continues executing after DDR initialization, not because a synthetic page-fault test asks M-mode to initialize DDR through ECALL.
+
+## 12. Management Complex boundary discovered during M00-07 closure
+
+The future Management Complex is not a second Hostboot.
+
+A useful responsibility split is:
+
+```text
+Boot Engine / minimal management prerequisite
+    -> make the host safely executable
+    -> minimum power/PLL/reset/security prerequisites
+
+Host Jixia firmware
+    -> make the platform operational
+    -> heavy HWP/istep execution
+    -> memory discovery/configuration/training/diagnostics
+    -> address-map and mainstore orchestration
+
+Management Complex
+    -> keep the platform manageable
+    -> always-on/OOB runtime management
+    -> RAS event aggregation and monitoring
+    -> watchdog/recovery coordination
+    -> telemetry, thermal/power supervision, BMC communication
+```
+
+This avoids paying for a large Management Complex SRAM and software environment merely to host memory-training code that the host can demand-page from PNOR while still in contained mode.
+
+## 13. Definition of Done
+
+M00-07 is complete when all four acceptance scripts are green together with the existing M00-02 through M00-06 regression chain:
+
+```bash
+bash scripts/test-m00-07-01-pflash-stage0.sh
+bash scripts/test-m00-07-02-contained-memory.sh
+bash scripts/test-m00-07-03-pre-ddr-paging.sh
+bash scripts/test-m00-07-04-mainstore-transition.sh
+```
+
+The milestone does not require a production DDR PHY implementation, final user-service model, or real cache-contained hardware.
+
+The durable result of M00-07 is the pre-DDR substrate needed to build those later layers without redesigning the boot image, allocator, VMM, or PNOR paging foundations.
