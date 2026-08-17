@@ -8,7 +8,11 @@ This is the canonical execution plan for Jixia's current one-person development 
 
 **Latest completed milestone:** M00-07 Pre-DDR Memory Foundation
 
-**Immediate next step:** Hostboot execution-flow research gate before freezing the next implementation milestone
+**Current milestone:** M00-08 Boot Service Execution Foundation
+
+**Immediate next step:** M00-08.01 — promote the accepted privilege-transition/VMM mechanisms into a real `TaskContext` and M-mode-bare -> U-mode boot-task dispatch path.
+
+Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
@@ -65,11 +69,13 @@ RAS integration
 
 seL4 is not the boot-flow template; it is a protection/mechanism reference. NXP is not the boot-flow template; it is a component-boundary/package reference.
 
+OpenSBI is the primary RISC-V SBI/runtime reference implementation and compatibility oracle. Jixia implements the SBI standard ABI with Jixia-owned M-mode mechanisms rather than embedding the complete OpenSBI `lib/sbi` executive as the runtime owner.
+
 ## 3. Branch and integration policy
 
 - `main` is the latest stable integrated checkpoint.
 - `milestone/<id>-<topic>` is the current implementation branch.
-- research branches may capture architecture findings before a milestone is frozen.
+- research/docs branches may capture architecture findings before or between implementation milestones.
 
 Completion rule:
 
@@ -116,75 +122,114 @@ prepare-before-publish allocator gating
 
 M00-07 does not claim a production post-DDR firmware flow. See `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`.
 
-## 5. NOW — Hostboot service/InitService research gate
+## 5. Research gate closed — Hostboot service startup
 
-Before creating the next implementation milestone, trace Hostboot from Base/kernel entry to real firmware services and memory isteps.
+The research gate after M00-07 established enough of the Hostboot execution model to freeze the next milestone.
 
-Required study path:
-
-```text
-Hostboot Base entry
-    -> kernel initialization
-    -> scheduler/task foundation
-    -> VMM
-    -> VFS
-    -> PNOR Resource Provider
-    -> first user/service task
-    -> InitService
-    -> module/service load
-    -> istep dispatch
-    -> HWP invocation
-    -> memory isteps
-    -> proc_exit_cache_contained
-    -> MM_EXTEND_REAL_MEMORY / VMM extension
-```
-
-Research output must answer:
-
-1. what runs in Hostboot kernel versus user space before DDR;
-2. when the first user/service task starts;
-3. how pageable HBI/service code is loaded and resumed;
-4. how a Resource Provider participates in a page fault without making the pager recursively depend on pageable critical-path code;
-5. how InitService sequences hardware work and HWP libraries;
-6. which memory stages belong to host firmware and which minimum prerequisites belong to Boot Engine/Management Complex;
-7. the exact ordering of DDR viability, BAR/decode setup, exit-contained, and VMM/mainstore extension;
-8. which Hostboot mechanisms should be retained conceptually and which protection boundaries should be strengthened using seL4-style capabilities/address spaces;
-9. what RISC-V M/S/U placement best fits the resulting Jixia model.
-
-Do not implement a fake user service merely to advance the roadmap. Freeze the next milestone only after these questions are answered.
-
-## 6. Likely next implementation direction — not yet numbered
-
-The next implementation milestone is expected to establish a minimal Hostboot-style firmware service execution substrate, but its exact scope and milestone number remain deliberately open until the research gate closes.
-
-Candidate mechanisms:
+Confirmed architecture lessons include:
 
 ```text
-task/thread object
-minimal scheduler
-service address space
-message/IPC foundation
-service lifecycle
-VFS/module-load boundary
-initial InitService
-minimum capability/object ownership
+kernel PageManager/heap/VMM exist before the first firmware task
+    -> first init task bootstraps a resident root VFS/registry
+    -> Base InitService starts resident prerequisites
+    -> PNOR precedes Extended VFS/Resource Provider
+    -> extended/pageable components are looked up through prebuilt metadata
+    -> a page fault can block the faulting task while a userspace provider fills the page
+    -> provider response installs translation state and resumes the original task
+    -> Hostboot firmware tasks execute at lower privilege than the kernel
 ```
 
-The first service demo should be architecture-driven, not a generic OS demo.
+Detailed source research belongs in the Firmware Google Drive Hostboot/OpenPOWER knowledge area. The durable Jixia consequences are recorded in `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
-Likely target:
+## 6. NOW — M00-08 Boot Service Execution Foundation
+
+Primary objective:
+
+> Turn the accepted M00-06/M00-07 privilege and VMM mechanisms into a real first-class boot-task execution substrate.
+
+Production boot privilege model:
 
 ```text
-resident Base/kernel
-    -> create initial firmware service execution context
-    -> load/start a small pageable service/module
-    -> service communicates with kernel through defined mechanism
-    -> InitService can sequence a small synthetic istep list
+M-mode
+    Jixia microkernel
+    bare / physical address domain
+
+S-mode
+    unused by boot services
+    reserved for later OS/hypervisor use
+
+U-mode
+    disposable Jixia boot services
+    Sv39 translated
 ```
 
-Only after this exists should DDR initialization be moved into the real host boot flow.
+M00-06/M00-07 S-mode contexts remain mechanism tests only.
 
-## 7. Memory continuation after InitService exists
+### M00-08 planned increments
+
+```text
+08.01  TaskContext + M-mode bare kernel -> U-mode task -> ECALL -> M
+08.02  minimal task states, ready queue, scheduler, idle path
+08.03  minimum task syscalls: yield, exit, create/wait as required
+08.04  message queue + blocking/wakeup IPC foundation
+08.05  resident Root Component Registry / prebuilt component catalog
+08.06  init_main bootstrap -> registry -> InitService
+08.07  minimal Base InitService task list and lifecycle acceptance
+```
+
+### M00-08.01 acceptance direction
+
+Prove at least:
+
+```text
+M-mode kernel remains in the bare/physical domain
+TaskContext owns an explicit VSpace/satp identity
+mret enters a real U-mode task
+U-mode executes through Sv39
+U-mode ECALL traps directly to the M-mode kernel
+kernel recovers current task identity and arguments
+return/termination is controlled by task state rather than a probe-specific path
+```
+
+The first implementation may use a simple/shared service page-table root, but task APIs must not hard-code a global `satp`; later per-service VSpaces must fit without redesigning task context.
+
+M00-08 does not implement a general Linux-style runtime dynamic ELF linker. ELF remains a build-time input; runtime starts preprocessed firmware components through a component catalog.
+
+## 7. NEXT — provider-backed pageable components
+
+After M00-08 establishes real tasks, scheduler, IPC, and InitService bootstrap, replace the M00-07 direct trap-to-FlashProvider acceptance path with the production provider model:
+
+```text
+U service page fault
+    -> M VMM
+    -> VmRegion / BackingObject
+    -> allocate frame
+    -> send Resource Provider request
+    -> faulting task BLOCKED
+    -> resident/pinned provider runs
+    -> PNOR/backing store -> frame
+    -> provider response
+    -> install PTE
+    -> wake task
+    -> retry exact faulting instruction
+```
+
+This milestone will also formalize the extended component catalog/manifest boundary.
+
+Preferred component flow:
+
+```text
+ELF at build time
+    -> validate/relocate/layout
+    -> generate component identity, entry, VmRegions, permissions, backing, dependencies
+    -> later capability/hash/signature metadata
+    -> PNOR + catalog
+
+runtime
+    ComponentId/name -> catalog -> VSpace/backing -> task
+```
+
+## 8. Memory continuation after InitService/provider paging exists
 
 The later memory continuation should be natural:
 
@@ -217,7 +262,70 @@ real contained backend is retired correctly on Jingjie/hardware
 
 Do not re-create VMM/page tables after DDR merely to make the test pass; the point is continuity across the transition.
 
-## 8. Management Complex roadmap boundary
+## 9. Boot-to-runtime lifecycle
+
+Boot U-mode services are ephemeral firmware processes. They must not become permanent runtime dependencies.
+
+Future `exit_boot_services()` semantics include:
+
+```text
+stop new boot task creation
+finish/cancel boot graph
+quiesce providers
+complete/drain IPC
+revoke boot-scoped capabilities
+release task stacks/pages
+tear down service VSpaces
+invalidate stale translations
+remove temporary physical permissions
+scrub sensitive boot-only state
+publish final platform handoff
+enter persistent Jixia M-mode runtime
+```
+
+After this boundary, the normal system software world is:
+
+```text
+Native:
+    M   Jixia Runtime
+    S   Linux / OS
+    U   applications
+
+Virtualized:
+    M   Jixia Runtime
+    HS  hypervisor / host kernel
+    VS  guest kernel
+    VU  guest application
+```
+
+## 10. Native Jixia SBI/runtime direction
+
+Jixia Runtime remains the persistent M-mode machine authority.
+
+```text
+Jixia M Runtime
+    -> SBI standard ABI
+    -> hart/timer/IPI/reset/platform runtime mechanisms
+    -> machine-level RAS containment and notification
+    -> security monitor / trust continuity
+    -> confidential-computing hooks and state
+    -> Management Complex interface
+```
+
+OpenSBI is used as:
+
+```text
+reference implementation
+compatibility target
+differential oracle
+source of implementation ideas
+```
+
+Do not make the complete OpenSBI `lib/sbi` the authoritative Jixia runtime core because that library also owns trap, hart/HSM, domains, PMP/protection, IPI, timer, TLB, IRQ, PMU, heap/scratch, and related M-mode executive state.
+
+Selective leaf reuse is permitted only when ownership remains explicit and non-overlapping.
+
+## 11. Management Complex roadmap boundary
 
 Preferred role:
 
@@ -241,16 +349,33 @@ Heavy DDR training, large HWP libraries, rich attribute databases, and complex b
 
 This keeps Management Complex SRAM and software footprint proportional to its always-on management role.
 
-## 9. Planned later foundations
-
-Existing planned work remains valid, but ordering may move behind the Hostboot-style service substrate:
+Runtime responsibility is intentionally three-layered:
 
 ```text
+Management Complex
+    host-independent/OOB monitoring and recovery coordination
+
+Jixia M Runtime
+    architectural machine authority, SBI, RAS/security machine actions
+
+S/HS OS or hypervisor
+    process/page/VM/workload recovery and system policy
+```
+
+## 12. Planned later foundations
+
+Existing planned work remains valid, but ordering follows architectural dependencies:
+
+```text
+ACTIVE   M00-08 Boot Service Execution Foundation
+NEXT     provider-backed pageable component foundation
+NEXT     real InitService/ISTEP memory continuation
 PLANNED  Structured event and trace ABI
 PLANNED  Consolidated automated QEMU test harness
 PLANNED  PlatformGraph runtime model
 PLANNED  service isolation and restart
 PLANNED  capability-secured device/resource ownership
+PLANNED  native SBI runtime expansion
 PLANNED  rule-driven RAS/PRD-style diagnosis
 PLANNED  secure lifecycle and firmware update
 PLANNED  ArchHV / LPAR work after prerequisites
@@ -259,9 +384,9 @@ PLANNED  confidential LPAR work after virtualization/security prerequisites
 
 Do not preserve an old milestone number merely because it was once listed as NEXT; architectural dependency order wins.
 
-## 10. Later phase direction
+## 13. Later phase direction
 
-### Service operating system
+### Service operating substrate
 
 Deliverables eventually include:
 
@@ -273,10 +398,10 @@ capability handles
 W^X and guard pages
 service crash containment
 resource reclamation
-restart
+restart where lifecycle requires it
 ```
 
-The service architecture should improve on Hostboot's historical protection limits without abandoning its firmware-oriented boot flow.
+Boot services are disposable at runtime handoff even if the underlying mechanisms later support restart during boot.
 
 ### PlatformGraph and semantic debug
 
@@ -310,9 +435,9 @@ Recovery decisions remain deterministic and auditable.
 
 ### Secure lifecycle / confidential computing / virtualization
 
-These remain later gates after service ownership, memory, structured evidence, and platform modeling are sufficiently mature.
+These remain later gates after service ownership, memory, structured evidence, runtime SBI foundations, and platform modeling are sufficiently mature.
 
-## 11. Frozen areas
+## 14. Frozen areas
 
 Until prerequisites exist:
 
@@ -327,12 +452,13 @@ FROZEN  simulator-dependent partition hardware experiments
 
 Research may continue, but implementation does not bypass prerequisite gates.
 
-## 12. Current rule of thumb
+## 15. Current rule of thumb
 
 ```text
 Hostboot tells us how firmware boots.
-Jixia tells us which invariants and server requirements matter.
+Jixia defines the lifecycle, ownership, RAS, and security invariants.
 seL4 helps us protect the pieces.
 NXP helps us package the pieces.
+OpenSBI tells us how a mature SBI implementation behaves, but does not own Jixia runtime.
 Jingjie helps us prove the whole machine.
 ```
