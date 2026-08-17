@@ -176,14 +176,12 @@ extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe() {
         fail("no remaining mainstore range");
     }
 
-    const size_t ddr_pages_before_extend =
-        memory::page_manager::remaining_pages(BackingKind::ddr);
+    const size_t ddr_pages_before_extend = memory::page_manager::remaining_pages(BackingKind::ddr);
     if (!memory::page_manager::add_range(remaining.base, remaining.size, BackingKind::ddr)) {
         fail("remaining mainstore range rejected");
     }
 
-    const size_t ddr_pages_after_extend =
-        memory::page_manager::remaining_pages(BackingKind::ddr);
+    const size_t ddr_pages_after_extend = memory::page_manager::remaining_pages(BackingKind::ddr);
     if (ddr_pages_after_extend <= ddr_pages_before_extend) {
         fail("mainstore extension did not add pages");
     }
