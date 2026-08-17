@@ -4,20 +4,21 @@
 
 - **Last updated:** 2026-08-17
 - **Stable integration branch:** `main`
-- **Milestone closure branch:** `milestone/m00-07-memory-foundation`
 - **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation` — DONE
-- **Primary acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
-- **Immediate next step:** Hostboot kernel/VFS/InitService/istep startup research gate
-- **Next implementation milestone:** intentionally not frozen until that research gate closes
+- **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
+- **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
+- **Current implementation milestone:** `M00-08 Boot Service Execution Foundation` — ACTIVE
+- **Immediate next step:** M00-08.01 `TaskContext + M-mode bare kernel -> U-mode boot task -> ECALL -> M`
+- **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
 
 | Status | Meaning |
 |---|---|
-| `DONE` | implementation accepted and evidence retained |
+| `DONE` | implementation/research checkpoint accepted and evidence retained |
 | `ACTIVE` | the single current implementation milestone |
 | `RESEARCH` | architecture study required before a milestone is frozen |
-| `NEXT` | ordered immediately after the current gate |
+| `NEXT` | ordered immediately after the current milestone |
 | `PLANNED` | accepted roadmap item, not started |
 | `FROZEN` | implementation blocked by missing prerequisites |
 
@@ -34,8 +35,11 @@
 | M00-05 SMP foundation | DONE | `scripts/test-m00-05-population.sh` | HartLocal, private stacks, FDT population, per-hart timers |
 | M00-06 Privilege transition foundation | DONE | CI `31664329150` and later regressions | trusted M trap stack, M->S, S->M->S, hostile lower stack proof |
 | M00-07 Pre-DDR Memory Foundation | DONE | CI `32005255564`; `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md` | FFS pflash, contained EarlyMemory, Sv39, PNOR paging, mainstore mechanism prototype |
-| Hostboot service/InitService startup study | RESEARCH | current architecture gate | study kernel->VFS->user/service->InitService->istep->memory transition before coding |
-| Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering may move behind service substrate |
+| Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
+| M00-08 Boot Service Execution Foundation | ACTIVE | architecture checkpoint | first real U-mode boot-task substrate |
+| Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
+| Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
+| Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering follows prerequisites |
 | Consolidated automated QEMU harness | PLANNED | milestone scripts remain authoritative | later consolidation only |
 
 ---
@@ -46,17 +50,9 @@
 
 The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout.
 
-```text
-TRAP_FRAME_TEST: PASS
-```
-
 ### M00-03 — recoverable synchronous traps
 
 Recovery is whitelist-based. `EBREAK` and `C.EBREAK` are decoded before saved `mepc` is advanced by the actual instruction length.
-
-```text
-RECOVERABLE_TRAP_TEST: PASS
-```
 
 ### M00-04 — machine timer interrupt
 
@@ -93,122 +89,36 @@ Accepted runtime stack model:
 
 ```text
 normal M stack
-    ordinary M firmware execution
-
 trusted per-hart M trap stack
-    all runtime traps handled in M
-
-lower-privilege probe stack
-    synthetic S-mode acceptance contexts
+synthetic lower-privilege acceptance stack
 ```
 
-M00-06 proves:
+M00-06 proves controlled M->S and S->M->S transitions, trusted lower-origin trap storage, hostile lower-stack resistance, and fail-closed HartLocal anchoring.
 
-```text
-controlled M->S
-controlled S->M->S ECALL
-lower-origin sp is preserved only as a value
-TrapFrame remains in trusted HartLocal trap storage
-hostile S sp cannot redirect privileged storage
-missing trusted HartLocal anchor fails closed
-```
-
-The S-mode probes do not yet define the production Jixia service privilege model.
+The S-mode probes do not define the production Jixia service privilege model.
 
 ---
 
 ## DONE — M00-07 Pre-DDR Memory Foundation
 
-### Objective achieved
-
-Jixia can now treat firmware as a resident Base plus pageable Extended content and can service a real firmware page fault before DDR becomes allocator-visible.
-
-Accepted pre-DDR path:
+M00-07 established the minimum memory/storage substrate required before real firmware services exist:
 
 ```text
 pflash / PNOR-equivalent
     -> XIP Stage0
-    -> FFS
+    -> OpenPOWER-compatible FFS
     -> JXBASE resident Base
     -> contained EarlyMemory
-    -> PageManager
+    -> 4 KiB PageManager
     -> Sv39
-    -> JXEXT remains in pflash
-    -> real instruction page fault
+    -> JXEXT remains pageable
+    -> real pre-DDR instruction page fault
     -> pflash -> EarlyMemory page
     -> install mapping
     -> retry exact faulting instruction
 ```
 
-M00-07.04 also establishes a mechanism prototype for future mainstore transition:
-
-```text
-DDR lifecycle prototype
-    -> DDR ONLINE
-    -> TRANSITIONING
-    -> contained flush/castout point
-    -> MAINSTORE semantic commit
-    -> PageManager promote/register DDR metadata
-    -> allocation still gated
-    -> explicit publish
-    -> DDR allocation
-```
-
-### PNOR / FFS foundation
-
-The accepted pflash image uses an OpenPOWER-compatible FFS v1 table rather than a private fixed Base/Extended header.
-
-```text
-BOOT0   fixed XIP bootstrap partition
-JXBASE  resident Base, discovered by FFS identity
-JXEXT   optional pageable Extended partition
-```
-
-Stage0 knows the FFS TOC bootstrap location, not a hard-coded JXBASE data offset. The resident FlashProvider reuses the FFS parser to locate pageable firmware content.
-
-### EarlyMemory / PageManager
-
-QEMU models an 8 MiB semantic contained domain beginning at `0x80000000`. This is not a claim about a physical QEMU cache.
-
-A linker-reserved 64 KiB bootstrap pool provides 4 KiB allocator pages. Sv39 maps the resident 8 MiB using six page-table pages:
-
-```text
-1 L2 root
-1 L1
-4 L0
-= 24 KiB
-```
-
-The accepted rule remains:
-
-> 4 KiB is the unit of ownership; larger pages are later translation optimizations.
-
-### Real pre-DDR paging acceptance
-
-Primary command:
-
-```bash
-bash scripts/test-m00-07-03-pre-ddr-paging.sh
-```
-
-Core evidence:
-
-```text
-M00_07_PRE_DDR_PAGING_ARMED: PASS
-M00_07_PRE_DDR_PAGE_FAULT: PASS
-M00_07_PRE_DDR_FLASH_READ: PASS
-M00_07_PRE_DDR_BACKING_EARLY: PASS
-M00_07_PRE_DDR_PAGING_RESUME: PASS
-M00-07.03 pre-DDR flash-backed paging: PASS
-```
-
-The synthetic S-mode context exists only to produce a real Sv39 instruction page fault. It is not a user service or InitService.
-
-### Mainstore publish-last correctness
-
-Review of M00-07.04 found a real state-machine gap: the old code enabled DDR allocation as part of `complete_mainstore_transition()` before PageManager had promoted the contained range and registered the remaining DDR range.
-
-The corrected publication order is:
+M00-07.04 also established the future mainstore publication invariant:
 
 ```text
 DDR hardware online
@@ -220,118 +130,159 @@ allocator metadata ready
 allocation published
 ```
 
-Final policy:
+Final policy is prepare-before-publish; after mainstore publication there is no hidden fallback to contained allocation.
 
-```text
-CONTAINED                -> contained allocation allowed
-TRANSITIONING             -> allocation forbidden
-MAINSTORE, gate closed    -> allocation forbidden
-MAINSTORE, gate open      -> DDR allocation only
-```
+Full closure evidence: GitHub Actions run `32005255564` passed formatting, build, and all M00-02 through M00-07.04 regressions.
 
-There is no hidden fallback from exhausted/unavailable DDR to contained memory after mainstore publication.
-
-Primary command:
-
-```bash
-bash scripts/test-m00-07-04-mainstore-transition.sh
-```
-
-Core evidence:
-
-```text
-M00_07_DDR_ALLOCATOR_GATED: PASS
-M00_07_DDR_DISCOVERED: PASS
-M00_07_DDR_TRAINING: PASS
-M00_07_DDR_TRAINED: PASS
-M00_07_DDR_TOPOLOGY_READY: PASS
-M00_07_DDR_ADDRESS_MAP_READY: PASS
-M00_07_DDR_DECODE_COMMITTED: PASS
-M00_07_DDR_ONLINE: PASS
-M00_07_CONTAINED_FLUSH: PASS
-M00_07_STABLE_ADDRESS: PASS
-M00_07_MAINSTORE_ALLOCATOR_GATED: PASS
-M00_07_MAINSTORE_TRANSITION: PASS
-M00_07_MAINSTORE_EXTEND: PASS
-M00-07.04 fake DDR lifecycle and mainstore transition: PASS
-```
-
-### Full closure evidence
-
-GitHub Actions run `32005255564` passed:
-
-```text
-patch hygiene / clang-format
-configure and build
-TrapFrame regression
-recoverable trap regression
-machine timer regression
-Kernel Print regression
-SMP population regression
-M00-06.02
-M00-06.03
-M00-06.04
-M00-07.01
-M00-07.02
-M00-07.03
-M00-07.04
-```
-
-### Scope freeze
-
-M00-07 is closed as **Pre-DDR Memory Foundation**.
-
-The following are not unfinished 07.05 items:
-
-```text
-production Host-driven DDR initialization
-real InitService/istep execution
-post-DDR PNOR paging into DDR
-pre-DDR page-table continuity across real exit-contained
-real cache-contained retirement on hardware/SimSoc
-```
-
-They are deferred until the Hostboot-style firmware service execution flow exists.
-
-The unused `MemoryDomain::early_retired` idea was removed. If future hardware requires real early-memory draining, unmapping, invalidation, or power gating, model that as a separate lifecycle with actual side effects rather than adding a label-only memory domain.
+M00-07 is closed as **Pre-DDR Memory Foundation**. Production DDR initialization, real InitService/istep execution, post-DDR provider-backed paging, and real cache-contained retirement are later milestones.
 
 ---
 
-## RESEARCH — Hostboot service/InitService startup gate
+## DONE — Hostboot service/InitService architecture gate
 
-### Why this gate is next
+The 2026-08-17 source study answered enough of the boot execution model to begin coding.
 
-The M00-07 mechanisms are sufficient to support pageable pre-DDR firmware. The next architectural question is not another memory allocator feature; it is how Jixia transitions from early host bootstrap into real firmware services and an InitService/istep control flow.
-
-Primary study chain:
+Key source-derived conclusions:
 
 ```text
-Hostboot Base/kernel entry
-    -> task/scheduler foundation
-    -> VMM
-    -> VFS
-    -> PNOR Resource Provider
-    -> first user/service task
-    -> InitService
-    -> istep module execution
-    -> HWP calls
-    -> memory isteps
-    -> proc_exit_cache_contained
-    -> MM_EXTEND_REAL_MEMORY / VMM extension
+Hostboot kernel bootstrap
+    -> PageManager / HeapManager / VmmManager before first firmware task
+    -> create first init task
+    -> init task directly creates resident root VFS
+    -> barrier waits until root VFS/module table is usable
+    -> task_exec("libinitservice.so")
+    -> Base InitService
+    -> PNOR Base task
+    -> Extended VFS Resource Provider Base task
+    -> Extended InitService / pageable world
 ```
 
-### Required decisions before coding
+Hostboot does not require a Linux-style runtime ELF dynamic linker for Base modules. Its build linker extracts module metadata/entry points into a module table; runtime lookup resolves a module name to the prebuilt `_start` entry.
 
-- exact Hostboot kernel/user startup boundary;
-- what must remain resident before DDR;
-- how VFS/PNOR fault handling interacts with task scheduling and Resource Providers;
-- InitService versus HWP/platform mechanism responsibilities;
-- host versus Boot Engine/Management Complex DDR ownership;
-- final RISC-V M/S/U mapping for Jixia kernel and services;
-- where seL4-style capabilities/address-space isolation should strengthen the Hostboot model;
-- where NXP-style component manifests/dependency packaging should be adopted.
+The Extended VFS Resource Provider registers a virtual block with the already-existing VMM and backs it from PNOR. On a nonresident fault, the kernel allocates a frame, sends a Resource Provider read request, marks the faulting task blocked, schedules the provider, installs translation state on response, and wakes the original task.
 
-No synthetic `ECALL -> initialize DDR` control flow will be used as a substitute for this architecture.
+Hostboot task dispatch sets POWER problem-state privilege for firmware tasks. This supports a real kernel/service privilege boundary rather than treating firmware services as ordinary kernel callbacks.
+
+Detailed source paths, snippets, and research notes are retained in Google Drive rather than duplicated here.
+
+---
+
+## ACCEPTED — Jixia boot/runtime architecture checkpoint
+
+Canonical record: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
+
+### Production boot privilege model
+
+```text
+M-mode
+    Jixia microkernel
+    bare / physical address domain
+
+S-mode
+    not used for Jixia boot services
+    reserved for later OS/hypervisor
+
+U-mode
+    disposable firmware boot services
+    Sv39 translated
+```
+
+A U task/VSpace owns an explicit translation identity. M00-08 APIs must not hard-code one global `satp`, even if the first acceptance path temporarily shares one simple root.
+
+Kernel code must not dereference U virtual pointers as physical addresses; user-memory access will use explicit copy/translation abstractions.
+
+### Boot-service lifecycle
+
+Boot U-mode services are ephemeral firmware processes. `InitService`, MemoryInit, FabricInit, PCIe/CXL initialization, boot VSpaces/stacks/IPC endpoints, and boot-scoped capabilities must be destroyable at `exit_boot_services()`.
+
+No permanent runtime function may depend on a boot-only U-mode service.
+
+### Component model
+
+ELF remains the compiler/build interchange format. Jixia moves deterministic loader work to image-build time and generates a resident component catalog/manifest containing identity, entry, virtual ranges, permissions, backing, dependencies, and later capability/security metadata.
+
+Pre-DDR runtime does not require a general-purpose Linux dynamic linker.
+
+### Native Jixia SBI/runtime
+
+Jixia Runtime remains the persistent M-mode authority after boot-service teardown and implements the RISC-V SBI standard ABI with Jixia-owned mechanisms.
+
+OpenSBI is a reference implementation, compatibility target, and differential oracle. The complete `lib/sbi` executive is not planned as the authoritative Jixia runtime core because it also owns trap, hart/HSM, domain, PMP/protection, IPI, timer, TLB, IRQ/PMU, heap/scratch, and related machine state.
+
+Persistent runtime responsibilities include SBI, machine-level RAS, security/trust continuity, confidential-computing hooks, and Management Complex coordination.
+
+---
+
+## ACTIVE — M00-08 Boot Service Execution Foundation
+
+Primary goal:
+
+> Promote the accepted privilege-transition and VMM mechanisms into a real first-class boot task model.
+
+Planned increments:
+
+```text
+08.01  TaskContext + M-mode bare kernel -> U-mode task -> ECALL -> M
+08.02  minimal task states / scheduler / idle
+08.03  minimum task syscalls
+08.04  message queue + blocking/wakeup IPC
+08.05  resident Root Component Registry
+08.06  init_main -> registry -> InitService
+08.07  minimal Base InitService task-list lifecycle
+```
+
+### Immediate M00-08.01 acceptance direction
+
+```text
+M kernel remains bare/physical
+TaskContext has explicit VSpace identity
+mret enters real U-mode code through Sv39
+U ECALL traps to M
+current task identity and arguments survive the round trip
+termination/return is represented by task state, not probe-specific control flow
+```
+
+Start by reviewing the existing M00-06 privilege-transition code, M00-07 Sv39 primitives, and TrapFrame. Reuse mechanisms; do not extend the synthetic S-mode probe into the production service model.
+
+---
+
+## NEXT — provider-backed pageable components
+
+Once scheduler and IPC exist:
+
+```text
+U service fault
+    -> M VMM
+    -> allocate page
+    -> provider request
+    -> faulting task BLOCKED
+    -> resident/pinned U provider
+    -> PNOR/backing -> page
+    -> response
+    -> install PTE
+    -> wake and retry
+```
+
+This milestone replaces M00-07's direct kernel-side `FlashProvider` materialization with the intended service/provider architecture.
+
+---
+
+## Deferred memory continuation
+
+Only after real InitService and provider-backed paging exist:
+
+```text
+InitService / memory isteps
+    -> host-driven DDR discovery/configuration/training/diagnostics
+    -> address map / decode viable
+    -> exit contained
+    -> mainstore/VMM extension
+    -> continue the same firmware/service execution
+    -> natural post-DDR PNOR-backed fault
+    -> DDR-backed page allocation
+```
+
+The point is continuity across the transition, not rebuilding the VMM/page tables after DDR.
 
 ---
 
@@ -356,53 +307,31 @@ Management Complex
     -> power/thermal supervision
     -> BMC communication
     -> predictive health/rule execution
+
+Jixia M Runtime
+    -> architectural machine authority
+    -> SBI
+    -> machine RAS/security/confidential-computing actions
+    -> Management Complex bridge
 ```
 
-Do not inflate Management Complex SRAM and firmware into a second Hostboot unless a real hardware dependency requires it.
-
----
-
-## Planned queue after the research gate
-
-The next implementation milestone identifier is deliberately TBD. Likely direction is a minimal Hostboot-style firmware service execution substrate.
-
-Existing planned work remains valid but may be reordered behind that prerequisite:
-
-```text
-PLANNED  firmware task/service execution
-PLANNED  InitService/istep foundation
-PLANNED  typed IPC and capability ownership
-PLANNED  service address spaces and fault containment
-PLANNED  structured event and trace ABI
-PLANNED  consolidated QEMU harness
-PLANNED  PlatformGraph runtime model
-PLANNED  post-DDR memory continuation under real boot flow
-```
-
-Only one primary implementation milestone is active at a time.
-
----
-
-## Branch / integration rule
-
-Development branches may contain fine-grained commits. Accepted milestones are integrated into `main` as semantic checkpoints, normally by squash merge.
-
-```text
-main
-  |
-  +-- milestone branch
-          -> implementation
-          -> tests / CI
-          -> design record
-          -> closure records
-          -> squash accepted checkpoint into main
-```
-
-Do not leave a completed milestone branch unintegrated while `main` becomes stale.
+Do not inflate Management Complex SRAM/software into a second Hostboot.
 
 ---
 
 ## Progress history
+
+### 2026-08-17 — boot-service/runtime architecture frozen; M00-08 activated
+
+- Closed M00-07 and integrated it into `main`.
+- Traced Hostboot kernel bootstrap through first init task, root VFS, Base InitService, PNOR, Extended VFS Resource Provider, and Extended InitService.
+- Traced the Hostboot provider-backed fault path: kernel allocates and blocks; userspace provider fills; kernel attaches translation and resumes.
+- Confirmed Hostboot firmware tasks execute at lower privilege than the kernel.
+- Selected Jixia production boot model: M-mode bare microkernel + Sv39 U-mode disposable boot services; S-mode reserved for the later OS/hypervisor.
+- Selected build-time ELF preprocessing plus runtime component catalog instead of a general pre-DDR dynamic ELF loader.
+- Defined `exit_boot_services()` as a real teardown boundary for the U-mode boot world.
+- Selected a native Jixia M-mode SBI/runtime as the persistent RAS/security machine authority; OpenSBI remains reference/differential oracle rather than the authoritative runtime library.
+- Activated M00-08 Boot Service Execution Foundation; immediate target is M00-08.01 TaskContext/U-mode dispatch.
 
 ### 2026-08-17 — M00-07 accepted
 
@@ -415,20 +344,5 @@ Do not leave a completed milestone branch unintegrated while `main` becomes stal
 - Found and fixed allocator publication ordering: PageManager metadata is prepared before DDR allocation becomes visible.
 - Removed the label-only `early_retired` memory-domain idea.
 - Full closure CI run `32005255564` passed all M00-02 through M00-07.04 regressions.
-- Closed M00-07 as Pre-DDR Memory Foundation.
-- Opened the Hostboot service/InitService startup research gate before the next implementation milestone.
-
-### 2026-08-13 — M00-06 closed
-
-- Hostile lower-privilege x2/sp proof accepted.
-- Trusted M TrapFrame storage remained on the per-hart trap stack.
-- Missing `mscratch -> HartLocal` lower-origin path failed closed.
-- M00-07 Memory Foundation activated.
-
-### 2026-08-11 to 2026-08-12 — M00-05/M00-06 foundation
-
-- SMP population, HartLocal, per-hart stacks/timers accepted.
-- Controlled M->S and S->M->S paths accepted.
-- Repository formatting and CI enforcement established.
 
 Earlier milestone details remain in their dedicated design records and Git history.
