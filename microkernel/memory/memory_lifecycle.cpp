@@ -214,6 +214,17 @@ bool complete_mainstore_transition() {
     }
 
     g_state.domain = MemoryDomain::mainstore;
+    return true;
+}
+
+bool enable_mainstore_allocation() {
+    if (g_state.domain != MemoryDomain::mainstore ||
+        g_state.ddr != DdrState::online ||
+        !g_state.contained_flush_complete ||
+        g_state.ddr_allocation_enabled) {
+        return false;
+        }
+
     g_state.ddr_allocation_enabled = true;
     return true;
 }

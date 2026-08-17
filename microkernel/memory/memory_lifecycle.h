@@ -88,6 +88,7 @@ void initialize_contained();
 [[nodiscard]] bool begin_mainstore_transition();
 [[nodiscard]] bool mark_contained_flush_complete();
 [[nodiscard]] bool complete_mainstore_transition();
+[[nodiscard]] bool enable_mainstore_allocation();
 
 [[nodiscard]] bool validate_mainstore_invariants();
 

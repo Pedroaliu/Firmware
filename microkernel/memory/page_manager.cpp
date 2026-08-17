@@ -85,10 +85,10 @@ bool add_range(uintptr_t base, size_t size, BackingKind backing) {
     }
 
     if (backing == BackingKind::ddr) {
-        if (!memory::ddr_allocation_enabled() || memory::backing_for(base) != BackingKind::ddr ||
+        if (memory::backing_for(base) != BackingKind::ddr ||
             memory::backing_for(end - 1U) != BackingKind::ddr) {
             return false;
-        }
+            }
     }
 
     g_ranges[g_range_count] = {
@@ -147,14 +147,20 @@ size_t promote_backing(BackingKind from, BackingKind to) {
 }
 
 Allocation allocate_page() {
-    if (memory::ddr_allocation_enabled()) {
-        const Allocation ddr_page = allocate_from(BackingKind::ddr);
-        if (ddr_page.valid()) {
-            return ddr_page;
-        }
+    const Snapshot state = memory::snapshot();
+
+    if (state.ddr_allocation_enabled) {
+        return allocate_from(BackingKind::ddr);
     }
 
-    return allocate_from(BackingKind::contained);
+    if (state.domain == MemoryDomain::contained) {
+        return allocate_from(BackingKind::contained);
+    }
+
+    return {
+        .physical_address = 0U,
+        .backing = BackingKind::unavailable,
+    };
 }
 
 size_t remaining_pages(BackingKind backing) {
