@@ -4,6 +4,7 @@
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
 #include "microkernel/core/smp_timer_test.h"
+#include "microkernel/memory/memory_lifecycle.h"
 #include "lib/fdt.h"
 
 
@@ -14,10 +15,34 @@ extern "C" [[noreturn]] void jixia_trap_frame_test();
 extern "C" [[noreturn]] void jixia_m00_06_02_enter_supervisor();
 extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
+extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe();
+extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe();
 
 namespace jixia::microkernel {
 namespace {
 
+void initialize_memory_foundation() {
+    memory::initialize_contained();
+    const memory::Snapshot state = memory::snapshot();
+
+    printk("\n"
+           "[Jixia][M00-07][Memory]\n"
+           "state       : %s\n"
+           "contained   : [%p, %p)\n"
+           "ddr         : %s\n"
+           "ddr alloc   : %s\n",
+           memory::domain_name(state.domain), reinterpret_cast<void*>(state.contained.base),
+           reinterpret_cast<void*>(state.contained.base + state.contained.size),
+           memory::ddr_state_name(state.ddr),
+           state.ddr_allocation_enabled ? "enabled" : "disabled");
+
+    if (!memory::validate_contained_invariants()) {
+        printk("M00_07_CONTAINED_MEMORY: FAIL\n");
+        hart::park();
+    }
+
+    printk("M00_07_CONTAINED_MEMORY: PASS\n");
+}
 
 void print_hart_table(hart::HartIndex present_count)
 {
@@ -79,6 +104,13 @@ void boot_main(
      * console writers.
      */
     kernel_console::set_uart_mirror(true);
+
+    /*
+     * M00-07 begins the resident Base in an explicit contained-memory domain.
+     * DDR is not allocator-visible merely because QEMU physically implements
+     * the backing region as RAM.
+     */
+    initialize_memory_foundation();
 
     const ::jixia::fdt::CpuCountResult cpu_result =
         ::jixia::fdt::cpu_count(dtb_address);
@@ -208,6 +240,20 @@ void boot_main(
            "M00_06_04_BOUNDARY_ARMED: PASS\n");
 
     jixia_m00_06_04_enter_supervisor_boundary();
+#elif defined(JIXIA_M00_07_03_PROBE)
+    /*
+     * M00-07.03 leaves one executable Extended page only in pflash, enables
+     * Sv39 for an S-mode probe, and lets the resident M-mode pager satisfy the
+     * resulting instruction page fault from contained EarlyMemory.
+     */
+    jixia_m00_07_03_run_pre_ddr_paging_probe();
+#elif defined(JIXIA_M00_07_04_PROBE)
+    /*
+     * M00-07.04 walks the explicit fake DDR lifecycle and proves that the
+     * contained-to-mainstore backing transition preserves firmware address
+     * identity before remaining mainstore is handed to PageManager.
+     */
+    jixia_m00_07_04_run_mainstore_transition_probe();
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();

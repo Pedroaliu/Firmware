@@ -83,15 +83,31 @@ SECTIONS
         __bss_end = .;
     } > RAM :data
 
-.stack (NOLOAD) : ALIGN(16)
-{
-    __stack_bottom = .;
+    .stack (NOLOAD) : ALIGN(16)
+    {
+        __stack_bottom = .;
 
-    KEEP(*(.stack.harts))
-    KEEP(*(.stack.harts.*))
+        KEEP(*(.stack.harts))
+        KEEP(*(.stack.harts.*))
 
-    __stack_top = .;
-} > RAM
+        __stack_top = .;
+    } > RAM
+
+    /*
+     * M00-07 bootstrap physical pages. This is allocator-owned contained
+     * memory, not part of the resident firmware image. The pool is explicitly
+     * page aligned so Sv39 page tables and paged-in firmware can share the
+     * same simple PageManager contract.
+     */
+    .early_memory_pool (NOLOAD) : ALIGN(4096)
+    {
+        __early_page_pool_start = .;
+        . += 64K;
+        __early_page_pool_end = .;
+    } > RAM
+
+    ASSERT(__early_page_pool_end <= ORIGIN(RAM) + 8M,
+           "M00-07 early page pool must stay inside the contained 8 MiB window")
 
     __image_end = .;
 

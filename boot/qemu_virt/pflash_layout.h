@@ -1,0 +1,26 @@
+#pragma once
+
+/*
+ * M00-07 QEMU virt pflash0 platform contract.
+ *
+ * Stage0 remains at the reset/XIP address. The rest of the image is described
+ * by an OpenPOWER-compatible FFS v1 table at a fixed bootstrap locator.
+ */
+
+#define JIXIA_QEMU_PFLASH_BASE 0x20000000
+#define JIXIA_QEMU_PFLASH_SIZE 0x02000000
+
+#define JIXIA_PFLASH_STAGE0_LIMIT 0x00001000
+#define JIXIA_PFLASH_TOC_OFFSET 0x00001000
+#define JIXIA_PFLASH_TOC_SIZE 0x00008000
+#define JIXIA_PFLASH_DATA_OFFSET 0x00010000
+#define JIXIA_PFLASH_BLOCK_SIZE 0x00001000
+#define JIXIA_PFLASH_BLOCK_COUNT 0x00002000
+#define JIXIA_PFLASH_MAX_FFS_ENTRIES 255
+
+#define JIXIA_CONTAINED_BASE_ADDRESS 0x80000000
+#define JIXIA_CONTAINED_ENTRY_ADDRESS 0x80000000
+
+#define JIXIA_QEMU_UART0_BASE 0x10000000
+#define JIXIA_QEMU_UART_LSR_OFFSET 5
+#define JIXIA_QEMU_UART_LSR_THRE 0x20

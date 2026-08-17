@@ -93,6 +93,22 @@ jobs:
         run: |
           bash scripts/test-m00-06-04-privilege-boundary.sh
 
+      - name: M00-07.01 pflash Stage0 to resident Base
+        run: |
+          bash scripts/test-m00-07-01-pflash-stage0.sh
+
+      - name: M00-07.02 explicit contained EarlyMemory state
+        run: |
+          bash scripts/test-m00-07-02-contained-memory.sh
+
+      - name: M00-07.03 pre-DDR flash-backed paging
+        run: |
+          bash scripts/test-m00-07-03-pre-ddr-paging.sh
+
+      - name: M00-07.04 fake DDR and mainstore transition
+        run: |
+          bash scripts/test-m00-07-04-mainstore-transition.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,3 +127,7 @@ jobs:
             build/m00-06-02/
             build/m00-06-03/
             build/m00-06-04/
+            build/m00-07-01/
+            build/m00-07-02/
+            build/m00-07-03/
+            build/m00-07-04/

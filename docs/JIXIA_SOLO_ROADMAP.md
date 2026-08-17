@@ -2,64 +2,88 @@
 
 ## Status
 
-This is the canonical execution plan for the current **one-person development mode**.
+This is the canonical execution plan for Jixia's current one-person development mode.
 
-The project is developed by the repository owner with ChatGPT acting as a research, teaching, architecture, review, debugging, and implementation partner. The goal is not maximum parallel throughput. The goal is to understand, implement, test, and document each mechanism deeply enough that the project remains coherent and teachable.
+**Last updated:** 2026-08-17
 
-Last updated: **2026-08-11**
+**Latest completed milestone:** M00-07 Pre-DDR Memory Foundation
+
+**Immediate next step:** Hostboot execution-flow research gate before freezing the next implementation milestone
+
+The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
 ## 1. Working model
 
-Jixia follows a single-threaded development rule:
-
 ```text
-one active milestone
-    -> concept and invariants
-    -> interface and state design
-    -> implementation
-    -> normal-path test
-    -> failure-path test
-    -> trace and observability
-    -> documentation and review
-    -> progress record
-    -> next milestone
+one implementation milestone or architecture research gate
+    -> study the primary reference implementation
+    -> define responsibility boundaries
+    -> define invariants and failure modes
+    -> implement minimum mechanism
+    -> add machine-checkable acceptance
+    -> retain old regressions
+    -> update design/progress records
+    -> integrate accepted checkpoint into main
+    -> choose next milestone
 ```
 
-At any time the project has:
+At any time:
 
-- **NOW**: exactly one primary milestone;
-- **NEXT**: at most three ordered milestones;
-- **BACKLOG**: all other features;
-- **FROZEN**: features that require missing architectural prerequisites.
+```text
+NOW       exactly one primary milestone or research gate
+NEXT      at most a few ordered items
+BACKLOG   accepted later work
+FROZEN    work blocked by architectural prerequisites
+```
 
-No new major subsystem begins before the current milestone satisfies its Definition of Done.
+## 2. Reference discipline
 
-## 2. Branch and recording policy
+For firmware lifecycle questions, use:
 
-### Branch roles
+```text
+Hostboot whole-system flow
+    -> Jixia platform requirements
+    -> seL4 protection/capability ideas
+    -> NXP component/package ideas
+    -> Linux/other implementation comparisons
+```
 
-- `main`: last integrated and stable project checkpoint.
-- `milestone/<id>-<topic>`: current milestone implementation branch.
-- `feature/<topic>`: optional short-lived branch for a contained supporting feature.
+Hostboot is the primary reference for:
 
-### Completion rule
+```text
+kernel/bootstrap flow
+user/service startup
+VFS/PNOR Resource Providers
+InitService
+isteps
+HWP invocation
+memory initialization
+cache-contained operation
+mainstore transition
+RAS integration
+```
 
-When a milestone is completed:
+seL4 is not the boot-flow template; it is a protection/mechanism reference. NXP is not the boot-flow template; it is a component-boundary/package reference.
 
-1. implementation and tests are committed;
-2. `docs/JIXIA_PROGRESS.md` is updated;
-3. `PROJECT_CONTEXT.md` is updated when the active milestone, architecture direction, repository, or trust model changes;
-4. the milestone entry includes evidence: test command, expected output, design record, and known limitations;
-5. the completed milestone is merged promptly into `main`;
-6. the next milestone branch starts from that integrated checkpoint.
+## 3. Branch and integration policy
 
-A feature is not considered complete merely because code exists.
+- `main` is the latest stable integrated checkpoint.
+- `milestone/<id>-<topic>` is the current implementation branch.
+- research branches may capture architecture findings before a milestone is frozen.
 
----
+Completion rule:
 
-## 3. Current execution queue
+1. implementation complete;
+2. acceptance scripts and regression chain green;
+3. design record updated;
+4. `docs/JIXIA_PROGRESS.md` updated;
+5. `PROJECT_CONTEXT.md` updated when architecture direction/current state changes;
+6. milestone integrated promptly into `main`, normally as one semantic squash checkpoint;
+7. next implementation branch starts from current `main`.
 
-### Completed M00 foundation
+Do not leave completed milestone branches unintegrated while `main` becomes stale.
+
+## 4. Completed foundation
 
 ```text
 DONE  M00-00  Minimal RV64 boot, stack, BSS, UART
@@ -67,335 +91,248 @@ DONE  M00-01  Minimal fatal M-mode trap
 DONE  M00-02  Complete RV64 TrapFrame
 DONE  M00-03  Recoverable trap and mret
 DONE  M00-04  Machine timer interrupt
+DONE  F00-01  Kernel Print foundation
 DONE  M00-05  Per-hart state, private stacks, SMP foundation
+DONE  M00-06  Privilege transition foundation
+DONE  M00-07  Pre-DDR Memory Foundation
 ```
 
-M00-05 establishes the per-hart substrate required by privilege transition:
+M00-07 established:
 
 ```text
-private per-hart stack
-HartId != dense HartIndex
-boot-hart-only global initialization
-release/acquire rendezvous
-HartLocal
-mscratch -> HartLocal
-per-hart mtvec
-per-hart timer state/compare
-actual population != capacity
+pflash/PNOR-equivalent image
+OpenPOWER-compatible FFS
+Stage0 -> resident JXBASE
+contained EarlyMemory
+4 KiB PageManager
+Sv39 pre-DDR page tables
+JXEXT pageable from pflash
+real pre-DDR instruction page fault
+FlashProvider fill into EarlyMemory
+fake DDR/mainstore mechanism prototype
+stable-address backing transition
+prepare-before-publish allocator gating
 ```
 
-Design record: `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
+M00-07 does not claim a production post-DDR firmware flow. See `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`.
 
-### NOW
+## 5. NOW — Hostboot service/InitService research gate
+
+Before creating the next implementation milestone, trace Hostboot from Base/kernel entry to real firmware services and memory isteps.
+
+Required study path:
 
 ```text
-M00-06  Privilege transition foundation
+Hostboot Base entry
+    -> kernel initialization
+    -> scheduler/task foundation
+    -> VMM
+    -> VFS
+    -> PNOR Resource Provider
+    -> first user/service task
+    -> InitService
+    -> module/service load
+    -> istep dispatch
+    -> HWP invocation
+    -> memory isteps
+    -> proc_exit_cache_contained
+    -> MM_EXTEND_REAL_MEMORY / VMM extension
 ```
 
-Initial objective:
+Research output must answer:
+
+1. what runs in Hostboot kernel versus user space before DDR;
+2. when the first user/service task starts;
+3. how pageable HBI/service code is loaded and resumed;
+4. how a Resource Provider participates in a page fault without making the pager recursively depend on pageable critical-path code;
+5. how InitService sequences hardware work and HWP libraries;
+6. which memory stages belong to host firmware and which minimum prerequisites belong to Boot Engine/Management Complex;
+7. the exact ordering of DDR viability, BAR/decode setup, exit-contained, and VMM/mainstore extension;
+8. which Hostboot mechanisms should be retained conceptually and which protection boundaries should be strengthened using seL4-style capabilities/address spaces;
+9. what RISC-V M/S/U placement best fits the resulting Jixia model.
+
+Do not implement a fake user service merely to advance the roadmap. Freeze the next milestone only after these questions are answered.
+
+## 6. Likely next implementation direction — not yet numbered
+
+The next implementation milestone is expected to establish a minimal Hostboot-style firmware service execution substrate, but its exact scope and milestone number remain deliberately open until the research gate closes.
+
+Candidate mechanisms:
 
 ```text
-M-mode Mozi
-    -> configure mstatus.MPP = S
-    -> configure mepc
-    -> mret
-    -> execute a controlled S-mode payload with satp = 0
-    -> trap/ecall back to M-mode
-    -> prove previous privilege and context
-    -> return or terminate through a defined path
+task/thread object
+minimal scheduler
+service address space
+message/IPC foundation
+service lifecycle
+VFS/module-load boundary
+initial InitService
+minimum capability/object ownership
 ```
 
-Required learning and implementation steps:
+The first service demo should be architecture-driven, not a generic OS demo.
 
-1. review RISC-V `mstatus.MPP`, `mepc`, `mret`, `mcause`, `mtval`, `mscratch`, and `ecall` semantics;
-2. define the exact M->S->M state machine before writing the payload;
-3. keep `satp = 0` for the first proof so privilege transition is isolated from paging;
-4. define what M-mode may trust after lower-privilege execution begins;
-5. design trusted per-hart trap/kernel stack entry using `mscratch -> HartLocal`;
-6. preserve the interrupted S-mode `sp` in the saved context rather than using it as trusted kernel storage;
-7. decide the minimal TrapFrame/entry changes required for previous-privilege execution;
-8. add a controlled S-mode payload and an `ecall` or equivalent trap back to M-mode;
-9. prove expected `mstatus.MPP`, `mepc`, `mcause`, register preservation, and stack ownership;
-10. retain all M00-02 through M00-05 and Kernel Print regressions;
-11. document delegation, paging, PMP, nested-trap, and security limitations explicitly.
-
-The first M00-06 proof does **not** add:
+Likely target:
 
 ```text
-Sv39/page tables
-physical allocator
-scheduler/tasks
-user mode
-PMP service isolation
-ArchHV/HS/VS
-full syscall ABI
+resident Base/kernel
+    -> create initial firmware service execution context
+    -> load/start a small pageable service/module
+    -> service communicates with kernel through defined mechanism
+    -> InitService can sequence a small synthetic istep list
 ```
 
-### NEXT
+Only after this exists should DDR initialization be moved into the real host boot flow.
+
+## 7. Memory continuation after InitService exists
+
+The later memory continuation should be natural:
 
 ```text
-M00-07  Early physical allocator
-M00-08  Structured event and trace ABI
-M00-09  Automated QEMU test harness
+InitService
+    -> memory isteps
+    -> SPD/VPD/attributes/topology
+    -> host-owned DDR configuration/training
+    -> memory diagnostics
+    -> grouping/interleave/address map
+    -> decode viable
+    -> exit contained
+    -> kernel VMM/PageManager mainstore extension
+    -> continue the same firmware/service execution
+    -> post-DDR PNOR-backed page fault
+    -> DDR-backed page allocation
 ```
 
----
+Acceptance must then prove:
 
-## 4. Phase plan
+```text
+pre-DDR Sv39 root survives
+pre-DDR L1/L0 tables survive
+existing VA mappings survive
+existing live firmware object identities survive
+no stale contained-only allocator ownership remains
+new page faults allocate DDR
+real contained backend is retired correctly on Jingjie/hardware
+```
 
-Calendar estimates assume approximately **8-12 hours per week** and are planning ranges, not deadlines.
+Do not re-create VMM/page tables after DDR merely to make the test pass; the point is continuity across the transition.
 
-### Phase A — Recoverable microkernel foundation
+## 8. Management Complex roadmap boundary
 
-Estimated duration: **2-3 months**
+Preferred role:
+
+```text
+Boot prerequisite:
+    root of trust
+    minimum power/clock/PLL/reset
+    release host
+
+Runtime/OOB:
+    RAS collection
+    telemetry
+    watchdog
+    thermal/power monitoring
+    BMC communication
+    rule/health monitoring
+    recovery/degrade coordination
+```
+
+Heavy DDR training, large HWP libraries, rich attribute databases, and complex boot orchestration remain host firmware responsibilities unless a later hardware dependency proves otherwise.
+
+This keeps Management Complex SRAM and software footprint proportional to its always-on management role.
+
+## 9. Planned later foundations
+
+Existing planned work remains valid, but ordering may move behind the Hostboot-style service substrate:
+
+```text
+PLANNED  Structured event and trace ABI
+PLANNED  Consolidated automated QEMU test harness
+PLANNED  PlatformGraph runtime model
+PLANNED  service isolation and restart
+PLANNED  capability-secured device/resource ownership
+PLANNED  rule-driven RAS/PRD-style diagnosis
+PLANNED  secure lifecycle and firmware update
+PLANNED  ArchHV / LPAR work after prerequisites
+PLANNED  confidential LPAR work after virtualization/security prerequisites
+```
+
+Do not preserve an old milestone number merely because it was once listed as NEXT; architectural dependency order wins.
+
+## 10. Later phase direction
+
+### Service operating system
+
+Deliverables eventually include:
+
+```text
+service tasks
+address-space ownership
+minimal typed IPC
+capability handles
+W^X and guard pages
+service crash containment
+resource reclamation
+restart
+```
+
+The service architecture should improve on Hostboot's historical protection limits without abandoning its firmware-oriented boot flow.
+
+### PlatformGraph and semantic debug
 
 Deliverables:
 
-- complete TrapFrame;
-- recoverable exception path;
-- timer interrupt;
-- per-hart state and stacks;
-- basic privilege transition;
-- early allocator;
-- structured event/trace foundation;
-- automated QEMU tests.
+```text
+physical topology and ownership graph
+structured trace/event schema
+semantic breakpoints
+fault injection
+state dump/diff
+Jingjie synchronization
+```
 
-Current state: M00-00 through M00-05 are complete; M00-06 is active.
+### RAS
 
-Exit direction:
+Power-style deterministic diagnostic rules remain the trusted spine, extended with:
 
 ```text
-multiple harts
-    -> trusted trap state
-    -> controlled privilege transition
-    -> allocator
-    -> structured event foundation
-    -> repeatable automated acceptance
+Structured Event
+PlatformGraph
+Incident Graph
+Machine Health Journal / Case Memory
+safe HWP active probes
+fleet rule mining
+Jingjie replay/counterfactual validation
+optional AI hypothesis ranking
 ```
 
-### Phase B — Minimal firmware service operating system
+Recovery decisions remain deterministic and auditable.
 
-Estimated duration: **3-4 months**
+### Secure lifecycle / confidential computing / virtualization
 
-Deliverables:
+These remain later gates after service ownership, memory, structured evidence, and platform modeling are sufficiently mature.
 
-- service tasks;
-- memory-region ownership;
-- PMP-backed service isolation;
-- capability handles;
-- minimal typed IPC;
-- guarded stacks and W^X policy;
-- service crash detection;
-- resource reclamation and restart.
+## 11. Frozen areas
 
-Exit demo:
+Until prerequisites exist:
 
 ```text
-Service A communicates with Service B
-    -> Service A performs an illegal access
-    -> Memory Guard contains the fault
-    -> only Service A is terminated and restarted
-    -> Service B and the microkernel continue
+FROZEN  production ArchHV/LPAR runtime
+FROZEN  HS/VS and G-stage virtualization implementation
+FROZEN  virtual interrupt/device architecture
+FROZEN  confidential LPAR runtime
+FROZEN  migration
+FROZEN  simulator-dependent partition hardware experiments
 ```
 
-### Phase C — PlatformGraph and semantic dynamic debug
+Research may continue, but implementation does not bypass prerequisite gates.
 
-Estimated duration: **3-4 months**
-
-Deliverables:
-
-- QEMU virt PlatformGraph schema and runtime model;
-- CPU, hart, memory, UART, timer, interrupt, MMIO, ownership, health, and trust objects;
-- trace ring and semantic event schema;
-- filtering by hart, service, transaction, and BootEpoch;
-- event breakpoints;
-- fault-injection interface;
-- state dump and state diff.
-
-Exit demo:
+## 12. Current rule of thumb
 
 ```text
-break on a semantic platform event
-    -> display owner, target, state, and capability context
-    -> inject a controlled fault
-    -> observe diagnosis and recovery evidence
+Hostboot tells us how firmware boots.
+Jixia tells us which invariants and server requirements matter.
+seL4 helps us protect the pieces.
+NXP helps us package the pieces.
+Jingjie helps us prove the whole machine.
 ```
-
-### Phase D — Rule-driven RAS, diagnosis, recovery, and AI-era reasoning
-
-Estimated duration: **3-4 months**
-
-Core direction:
-
-- Power-style deterministic diagnostic rules remain the trusted spine;
-- Structured Events and PlatformGraph provide common hardware semantics;
-- Incident Graph correlates cascaded errors;
-- HWP probes provide active diagnosis;
-- Machine Health Journal and Case Memory preserve experience;
-- AI may rank hypotheses and discover candidate rules;
-- accepted recovery actions remain deterministic and policy-controlled;
-- Jingjie provides replay, fault injection, and counterfactual validation.
-
-Detailed records:
-
-- `docs/JIXIA_RAS_ARCHITECTURE.md`
-- `docs/JIXIA_RAS_REASONING_VISION.md`
-- `docs/JIXIA_AI_RAS_ARCHITECTURE_SUMMARY.md`
-
-Exit demo direction:
-
-```text
-inject a platform/service fault
-    -> structured evidence
-    -> topology/owner correlation
-    -> diagnosis/hypothesis
-    -> optional safe HWP probe
-    -> deterministic containment/recovery
-    -> health verification
-    -> auditable incident case
-```
-
-### Phase E — Secure lifecycle, service update, and LinuxBoot preparation
-
-Estimated duration: **4-6 months**
-
-Deliverables:
-
-- image and service manifests;
-- measurement log;
-- signed service bundles;
-- anti-rollback versioning;
-- service quiesce;
-- state export/import;
-- transactional update and rollback;
-- minimal Linux image;
-- immutable root filesystem;
-- containerized or appliance-style boot services;
-- boot-candidate discovery and measurement tools.
-
-Security research additionally studies seL4-style minimization and formal assurance of selected trusted properties. Formal proof claims must always state their hardware, compiler/binary, cryptographic, and specification assumptions.
-
-### Phase F — Jingjie simulator foundation
-
-Start gate: the following contracts must be stable enough to share:
-
-- TrapFrame;
-- event schema;
-- fault schema;
-- PlatformGraph v0;
-- memory ownership model;
-- BootEpoch;
-- service lifecycle.
-
-Initial simulator sequence:
-
-```text
-S0  EventQueue, memory, UART, timer, MMIO
-S1  RV64 functional core
-S2  privilege architecture and MMU
-S3  interrupt and IOMMU models
-S4  firmware/simulator semantic-event closure
-```
-
----
-
-## 5. Frozen feature gates
-
-The following features are deliberately frozen during the firmware-first phases:
-
-- ArchHV implementation;
-- HS/VS execution;
-- G-stage translation;
-- vCPU scheduling;
-- virtual interrupts and virtual I/O;
-- LPAR resource contracts;
-- Service LPAR;
-- confidential LPAR runtime;
-- secure migration.
-
-LPAR implementation begins only after Jingjie provides:
-
-```text
-[ ] M/S/HS/VS privilege modes
-[ ] Sv39
-[ ] hgatp and G-stage translation
-[ ] virtual timer
-[ ] virtual interrupt model
-[ ] LPID-aware trace
-[ ] G-stage and IOMMU fault injection
-[ ] shared PlatformGraph/Event/Fault schemas
-```
-
-Architecture documents may preserve long-term LPAR and confidential-computing design, but those features are not current implementation work.
-
----
-
-## 6. Definition of Done
-
-Every milestone must satisfy all applicable items:
-
-```text
-[ ] concept and invariants documented
-[ ] implementation builds without warnings
-[ ] normal-path test passes
-[ ] failure-path test passes
-[ ] result is machine-checkable, not only UART text
-[ ] observability evidence exists at the level currently supported by the project
-[ ] known limitations are recorded
-[ ] design/source documentation is updated
-[ ] progress ledger is updated
-[ ] commit or integration point is retained as evidence
-[ ] current milestone does not regress earlier milestones
-```
-
-A future milestone may require stronger observability than an earlier one. Before M00-08, machine-checkable UART markers plus acceptance scripts are acceptable evidence; after the Structured Event ABI exists, new milestones should use it where applicable.
-
----
-
-## 7. Learning and collaboration contract
-
-The repository owner writes, debugs, and understands the core mechanisms to build real systems skill.
-
-ChatGPT supports the work by:
-
-- reading specifications, papers, and source references before each milestone;
-- teaching the relevant concepts and checking understanding;
-- helping derive data structures, state machines, invariants, and tests;
-- providing complete reference code when useful, especially for syntax-heavy scaffolding;
-- reviewing code and logs;
-- isolating failures through evidence rather than guesses;
-- maintaining roadmap, progress ledger, design records, and project context.
-
-Each milestone should leave durable artifacts:
-
-```text
-code
-machine-checkable tests
-design/invariant record
-known-limitations record
-```
-
----
-
-## 8. Developer workflow
-
-The normal local workflow is documented in `docs/JIXIA_DEVELOPER_WORKFLOW.md`.
-
-Primary commands:
-
-```bash
-bash scripts/setup-dev-env.sh --check
-bash scripts/jixia.sh build
-bash scripts/jixia.sh run --smp 4
-bash scripts/jixia.sh debug --smp 4
-```
-
-Generic developer commands do not replace milestone-specific acceptance gates.
-
----
-
-## 9. Roadmap maintenance
-
-Update this file when the execution queue, phase order, working model, feature gates, or Definition of Done materially changes.
-
-Routine test results and detailed milestone-completion evidence belong in `docs/JIXIA_PROGRESS.md` and the milestone design record.

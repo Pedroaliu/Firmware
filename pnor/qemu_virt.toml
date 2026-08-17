@@ -1,0 +1,28 @@
+[image]
+size = 0x02000000
+block_size = 0x00001000
+toc_offset = 0x00001000
+toc_size = 0x00008000
+data_offset = 0x00010000
+fill = 0xff
+
+[[partition]]
+name = "BOOT0"
+source = "stage0"
+offset = 0x00000000
+size = 0x00001000
+misc_flags = ["readonly"]
+
+[[partition]]
+name = "JXBASE"
+source = "base"
+align = 0x00001000
+misc_flags = ["readonly"]
+
+[[partition]]
+name = "JXEXT"
+source = "extended"
+optional = true
+align = 0x00001000
+pad_to = 0x00001000
+misc_flags = ["readonly"]

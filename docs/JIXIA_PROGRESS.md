@@ -2,415 +2,433 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-13
-- **Working mode:** solo development with ChatGPT research/review/implementation support
+- **Last updated:** 2026-08-17
 - **Stable integration branch:** `main`
-- **Current progress branch:** `milestone/m00-07-memory-foundation`
-- **Current milestone:** `M00-07 Memory foundation`
-- **Current status:** ACTIVE — implement the Hostboot-inspired flash -> contained memory -> DDR/mainstore lifecycle with stable firmware address identity
-- **Previous milestone:** `M00-06 Privilege transition foundation` — DONE; M00-06.04 hostile lower-privilege boundary accepted in CI run `31664329150`
+- **Milestone closure branch:** `milestone/m00-07-memory-foundation`
+- **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation` — DONE
+- **Primary acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
+- **Immediate next step:** Hostboot kernel/VFS/InitService/istep startup research gate
+- **Next implementation milestone:** intentionally not frozen until that research gate closes
 
 ## Status legend
 
 | Status | Meaning |
 |---|---|
 | `DONE` | implementation accepted and evidence retained |
-| `ACTIVE` | the single current primary milestone |
-| `NEXT` | ordered immediately after ACTIVE |
+| `ACTIVE` | the single current implementation milestone |
+| `RESEARCH` | architecture study required before a milestone is frozen |
+| `NEXT` | ordered immediately after the current gate |
 | `PLANNED` | accepted roadmap item, not started |
-| `FROZEN` | blocked by an architectural prerequisite |
-| `RESEARCH` | exploratory work without an implementation commitment |
+| `FROZEN` | implementation blocked by missing prerequisites |
 
 ## Milestone / feature ledger
 
 | Work item | Status | Evidence | Notes |
 |---|---|---|---|
-| M00-00 Minimal RV64 boot, stack, BSS, UART | DONE | `c30c0405b388a0fba4c528856236ff02267f1a77` | QEMU virt reset entry and initial firmware output |
+| M00-00 Minimal RV64 boot, stack, BSS, UART | DONE | `c30c0405b388a0fba4c528856236ff02267f1a77` | QEMU virt reset/bootstrap |
 | M00-01 Minimal fatal M-mode trap | DONE | `ce661a8c1f1798861cab2ef766749cae38bcdc69` | `mtvec`, `mcause`, `mepc`, `mtval` fatal path |
-| M00-02 Complete RV64 TrapFrame | DONE | `bash scripts/test-trap-frame.sh`; `TRAP_FRAME_TEST: PASS` | complete integer context, shared assembly/C++ ABI, common save/restore path |
-| M00-03 Recoverable trap and `mret` | DONE | `bash scripts/test-recoverable-trap.sh`; `RECOVERABLE_TRAP_TEST: PASS` | 32-bit `EBREAK` and 16-bit `C.EBREAK` resume through common restore + `mret` |
-| M00-04 Machine timer interrupt | DONE | PR #6; `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M-mode interrupt |
-| F00-01 Kernel print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, append-only KernelLogBuffer, temporary UART mirror, `printk` |
-| Console/timer integration | DONE | PR #8; `043d7c71eba8ed067ccda5421a11e408f69bd1a0` | timer and console foundations coexist without regression |
-| M00-05 Per-hart state, stacks, SMP foundation | DONE | `bash scripts/test-m00-05-population.sh`; user-confirmed 2026-08-11; `docs/JIXIA_M00_05_SMP_FOUNDATION.md` | private stacks, HartLocal/mscratch, explicit publication, FDT population, per-hart timers, 1/2/4-hart acceptance, controlled 5-hart rejection |
-| M00-06 Privilege transition foundation | DONE | `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`; CI run `31664329150` | trusted trap entry, M->S, S->M->S ECALL, hostile S stack and no-anchor fail-closed acceptance |
-| M00-07 Memory foundation | ACTIVE | `docs/JIXIA_MEMORY_MANAGEMENT_RESEARCH.md`; implementation evidence pending | flash/PNOR-equivalent image, contained early memory, pre-DDR paging, fake DDR lifecycle, stable-address transition, mainstore extension |
-| M00-08 Structured event and trace ABI | NEXT | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | shared later with Jingjie |
-| M00-09 Automated QEMU test harness | PLANNED | `scripts/jixia.sh`; milestone scripts remain authoritative | consolidate machine-checkable regression tests later |
+| M00-02 Complete RV64 TrapFrame | DONE | `scripts/test-trap-frame.sh` | complete integer context and common restore |
+| M00-03 Recoverable trap and `mret` | DONE | `scripts/test-recoverable-trap.sh` | 32-bit `EBREAK` and 16-bit `C.EBREAK` |
+| M00-04 Machine timer interrupt | DONE | `scripts/test-timer-interrupt.sh` | first recoverable asynchronous M interrupt |
+| F00-01 Kernel Print foundation | DONE | `scripts/test-kernel-print.sh` | formatter, KernelLogBuffer, temporary UART mirror |
+| M00-05 SMP foundation | DONE | `scripts/test-m00-05-population.sh` | HartLocal, private stacks, FDT population, per-hart timers |
+| M00-06 Privilege transition foundation | DONE | CI `31664329150` and later regressions | trusted M trap stack, M->S, S->M->S, hostile lower stack proof |
+| M00-07 Pre-DDR Memory Foundation | DONE | CI `32005255564`; `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md` | FFS pflash, contained EarlyMemory, Sv39, PNOR paging, mainstore mechanism prototype |
+| Hostboot service/InitService startup study | RESEARCH | current architecture gate | study kernel->VFS->user/service->InitService->istep->memory transition before coding |
+| Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering may move behind service substrate |
+| Consolidated automated QEMU harness | PLANNED | milestone scripts remain authoritative | later consolidation only |
 
 ---
 
-## Accepted foundation through M00-04/F00-01
+## Accepted foundation through M00-06
 
 ### M00-02 — TrapFrame
 
 The software trap ABI contains x0-x31 plus `mstatus`, `mepc`, `mcause`, and `mtval`. Assembly and C++ share one checked layout.
 
-Recorded result:
-
 ```text
 TRAP_FRAME_TEST: PASS
 ```
 
-Design record: `docs/JIXIA_M00_02_TRAP_FRAME.md`.
-
 ### M00-03 — recoverable synchronous traps
 
-Recovery is whitelist-based. The handler verifies `EBREAK` or `C.EBREAK`, advances saved `mepc` by the decoded instruction length, and returns through the common restore + `mret` path.
-
-Recorded result:
+Recovery is whitelist-based. `EBREAK` and `C.EBREAK` are decoded before saved `mepc` is advanced by the actual instruction length.
 
 ```text
 RECOVERABLE_TRAP_TEST: PASS
-TRAP_FRAME_TEST: PASS
 ```
 
 ### M00-04 — machine timer interrupt
 
-The timer path introduced the first asynchronous recoverable trap. Its core invariant is that asynchronous timer handling does **not** artificially advance saved `mepc`.
+Asynchronous timer handling does not artificially advance saved `mepc`.
 
 ### F00-01 — Kernel Print
 
-Accepted minimum diagnostic path:
-
 ```text
 printk
-   |
-shared freestanding formatter
-   |
-KernelLogBuffer
-   |
-   `---- temporary raw-UART mirror
+   -> shared freestanding formatter
+   -> KernelLogBuffer
+   -> temporary raw-UART mirror
 ```
 
-The future runtime Console Service remains a separate failure/runtime domain.
+### M00-05 — per-hart state and SMP foundation
+
+Accepted invariants:
+
+```text
+private stack before normal C/C++
+HartId != dense HartIndex
+boot hart owns global initialization
+release/acquire publication
+HartLocal anchored through mscratch
+per-hart timer ownership
+population discovered from bounded FDT
+1/2/4 harts accepted
+5 harts rejected as controlled over-capacity case
+```
+
+### M00-06 — privilege transition foundation
+
+Accepted runtime stack model:
+
+```text
+normal M stack
+    ordinary M firmware execution
+
+trusted per-hart M trap stack
+    all runtime traps handled in M
+
+lower-privilege probe stack
+    synthetic S-mode acceptance contexts
+```
+
+M00-06 proves:
+
+```text
+controlled M->S
+controlled S->M->S ECALL
+lower-origin sp is preserved only as a value
+TrapFrame remains in trusted HartLocal trap storage
+hostile S sp cannot redirect privileged storage
+missing trusted HartLocal anchor fails closed
+```
+
+The S-mode probes do not yet define the production Jixia service privilege model.
 
 ---
 
-## DONE — M00-05 Per-hart state, stacks, and SMP foundation
+## DONE — M00-07 Pre-DDR Memory Foundation
 
 ### Objective achieved
 
-Mozi now has a correct small-SMP foundation that separates architectural hart identity from dense software runtime state and does not infer physical topology from hart-number arithmetic.
+Jixia can now treat firmware as a resident Base plus pageable Extended content and can service a real firmware page fault before DDR becomes allocator-visible.
 
-### Accepted mechanisms
+Accepted pre-DDR path:
 
 ```text
-[x] define maximum capacity without treating it as actual population
-[x] define dense HartIndex separately from architectural HartId
-[x] provide a private per-hart stack before C/C++ entry
-[x] make exactly one boot hart perform BSS/global initialization
-[x] keep pre-BSS synchronization variables outside .bss
-[x] use atomic slot allocation for uniqueness
-[x] use explicit release/acquire ordering for publication
-[x] add HartLocal and bind it through per-hart mscratch
-[x] preserve a single-writer printk policy during M00-05
-[x] discover actual CPU population from a bounded FDT parser
-[x] reject invalid/zero/over-capacity population without waiting forever
-[x] move timer compare/state to per-hart ownership
-[x] prove every present hart can take its own timer interrupt
-[x] retain M00-02/M00-03/M00-04/F00-01 regressions
-[x] add machine-checkable 1/2/4-hart and over-capacity acceptance
-[x] record concurrency and SMP design invariants
+pflash / PNOR-equivalent
+    -> XIP Stage0
+    -> FFS
+    -> JXBASE resident Base
+    -> contained EarlyMemory
+    -> PageManager
+    -> Sv39
+    -> JXEXT remains in pflash
+    -> real instruction page fault
+    -> pflash -> EarlyMemory page
+    -> install mapping
+    -> retry exact faulting instruction
 ```
 
-### Core invariants
+M00-07.04 also establishes a mechanism prototype for future mainstore transition:
 
-- a hart never enters normal C/C++ on another hart's stack;
-- secondaries do not touch normal BSS/global state before the boot hart publishes completion;
-- slot-allocation atomicity and memory-publication ordering are treated as different problems;
-- `HartId` is architectural identity, while `HartIndex` is a dense software slot;
-- physical socket/core/cluster/NUMA topology belongs to PlatformGraph;
-- per-hart ownership is preferred over shared mutable state and locks;
-- `volatile` is not treated as cross-hart synchronization;
-- only the boot hart is a normal `printk` writer in this milestone;
-- `mscratch -> HartLocal` becomes the per-hart kernel-state anchor for later privilege work.
+```text
+DDR lifecycle prototype
+    -> DDR ONLINE
+    -> TRANSITIONING
+    -> contained flush/castout point
+    -> MAINSTORE semantic commit
+    -> PageManager promote/register DDR metadata
+    -> allocation still gated
+    -> explicit publish
+    -> DDR allocation
+```
 
-### Acceptance evidence
+### PNOR / FFS foundation
+
+The accepted pflash image uses an OpenPOWER-compatible FFS v1 table rather than a private fixed Base/Extended header.
+
+```text
+BOOT0   fixed XIP bootstrap partition
+JXBASE  resident Base, discovered by FFS identity
+JXEXT   optional pageable Extended partition
+```
+
+Stage0 knows the FFS TOC bootstrap location, not a hard-coded JXBASE data offset. The resident FlashProvider reuses the FFS parser to locate pageable firmware content.
+
+### EarlyMemory / PageManager
+
+QEMU models an 8 MiB semantic contained domain beginning at `0x80000000`. This is not a claim about a physical QEMU cache.
+
+A linker-reserved 64 KiB bootstrap pool provides 4 KiB allocator pages. Sv39 maps the resident 8 MiB using six page-table pages:
+
+```text
+1 L2 root
+1 L1
+4 L0
+= 24 KiB
+```
+
+The accepted rule remains:
+
+> 4 KiB is the unit of ownership; larger pages are later translation optimizations.
+
+### Real pre-DDR paging acceptance
 
 Primary command:
 
 ```bash
-bash scripts/test-m00-05-population.sh
+bash scripts/test-m00-07-03-pre-ddr-paging.sh
 ```
 
-User-confirmed on 2026-08-11.
-
-Supported matrix:
+Core evidence:
 
 ```text
--smp 1: PASS
--smp 2: PASS
--smp 4: PASS
+M00_07_PRE_DDR_PAGING_ARMED: PASS
+M00_07_PRE_DDR_PAGE_FAULT: PASS
+M00_07_PRE_DDR_FLASH_READ: PASS
+M00_07_PRE_DDR_BACKING_EARLY: PASS
+M00_07_PRE_DDR_PAGING_RESUME: PASS
+M00-07.03 pre-DDR flash-backed paging: PASS
 ```
 
-Controlled over-capacity case:
+The synthetic S-mode context exists only to produce a real Sv39 instruction page fault. It is not a user service or InitService.
+
+### Mainstore publish-last correctness
+
+Review of M00-07.04 found a real state-machine gap: the old code enabled DDR allocation as part of `complete_mainstore_transition()` before PageManager had promoted the contained range and registered the remaining DDR range.
+
+The corrected publication order is:
 
 ```text
--smp 5
-unsupported CPU count 5 (capacity 4)
-SMP_POPULATION_TEST: FAIL
-CONTROLLED_OVER_CAPACITY: PASS
+DDR hardware online
+    !=
+mainstore backing committed
+    !=
+allocator metadata ready
+    !=
+allocation published
 ```
 
-Supported cases preserve:
+Final policy:
 
 ```text
-SMP_FOUNDATION_TEST: PASS
-SMP_POPULATION_TEST: PASS
-SMP_TIMER_TEST: PASS
-KERNEL_PRINT_TEST: PASS
-RECOVERABLE_TRAP_TEST: PASS
-MACHINE_TIMER_TEST: PASS
-TRAP_FRAME_TEST: PASS
+CONTAINED                -> contained allocation allowed
+TRANSITIONING             -> allocation forbidden
+MAINSTORE, gate closed    -> allocation forbidden
+MAINSTORE, gate open      -> DDR allocation only
 ```
 
-Design record:
+There is no hidden fallback from exhausted/unavailable DDR to contained memory after mainstore publication.
 
-- `docs/JIXIA_M00_05_SMP_FOUNDATION.md`
-- `docs/JIXIA_CONCURRENCY_CORRECTNESS_RULES.md`
+Primary command:
 
-### Known limitations
+```bash
+bash scripts/test-m00-07-04-mainstore-transition.sh
+```
 
-M00-05 intentionally does not add:
+Core evidence:
 
-- scheduler or arbitrary secondary-hart work dispatch;
-- user/supervisor execution;
-- lower-privilege trap-stack switching;
-- concurrent multi-writer `printk`;
-- physical socket/core/NUMA topology;
-- dynamic hart hotplug;
-- a general PlatformGraph/FDT implementation;
-- structured Event/Trace ABI.
+```text
+M00_07_DDR_ALLOCATOR_GATED: PASS
+M00_07_DDR_DISCOVERED: PASS
+M00_07_DDR_TRAINING: PASS
+M00_07_DDR_TRAINED: PASS
+M00_07_DDR_TOPOLOGY_READY: PASS
+M00_07_DDR_ADDRESS_MAP_READY: PASS
+M00_07_DDR_DECODE_COMMITTED: PASS
+M00_07_DDR_ONLINE: PASS
+M00_07_CONTAINED_FLUSH: PASS
+M00_07_STABLE_ADDRESS: PASS
+M00_07_MAINSTORE_ALLOCATOR_GATED: PASS
+M00_07_MAINSTORE_TRANSITION: PASS
+M00_07_MAINSTORE_EXTEND: PASS
+M00-07.04 fake DDR lifecycle and mainstore transition: PASS
+```
 
-The host ThreadSanitizer experiment is deferred because the current Deepin GCC TSan runtime fails before the model executes with an unexpected-memory-mapping error; the available Clang setup lacks the required C++ standard-library configuration. This is recorded as a host-tooling limitation, not a target-runtime correctness failure.
+### Full closure evidence
 
-Structured trace/event evidence is not yet applicable because the shared event ABI is explicitly scheduled for M00-08. M00-05 uses machine-checkable serial markers plus the acceptance harness.
+GitHub Actions run `32005255564` passed:
+
+```text
+patch hygiene / clang-format
+configure and build
+TrapFrame regression
+recoverable trap regression
+machine timer regression
+Kernel Print regression
+SMP population regression
+M00-06.02
+M00-06.03
+M00-06.04
+M00-07.01
+M00-07.02
+M00-07.03
+M00-07.04
+```
+
+### Scope freeze
+
+M00-07 is closed as **Pre-DDR Memory Foundation**.
+
+The following are not unfinished 07.05 items:
+
+```text
+production Host-driven DDR initialization
+real InitService/istep execution
+post-DDR PNOR paging into DDR
+pre-DDR page-table continuity across real exit-contained
+real cache-contained retirement on hardware/SimSoc
+```
+
+They are deferred until the Hostboot-style firmware service execution flow exists.
+
+The unused `MemoryDomain::early_retired` idea was removed. If future hardware requires real early-memory draining, unmapping, invalidation, or power gating, model that as a separate lifecycle with actual side effects rather than adding a label-only memory domain.
 
 ---
 
-## DONE — M00-06 Privilege transition foundation
+## RESEARCH — Hostboot service/InitService startup gate
 
-### Objective achieved
+### Why this gate is next
 
-Mozi now has a controlled M->S->M transition and a machine-checkable proof that lower-privilege x2/sp cannot redirect M-mode trap storage.
+The M00-07 mechanisms are sufficient to support pageable pre-DDR firmware. The next architectural question is not another memory allocator feature; it is how Jixia transitions from early host bootstrap into real firmware services and an InitService/istep control flow.
 
-Completed state machine:
-
-```text
-M-mode Mozi
-    -> dedicated trusted per-hart M trap stack
-    -> MPP = S, mepc = S entry, satp = 0
-    -> mret
-    -> S-mode payload with its own stack
-    -> ECALL
-    -> M trap entry preserves interrupted x2 only as a value
-    -> TrapFrame constructed on trusted HartLocal trap storage
-    -> validate and return to S
-    -> hostile x2/sp proof
-    -> no-HartLocal lower-origin fail-closed proof
-```
-
-Accepted runtime stack ownership:
+Primary study chain:
 
 ```text
-per hart
-
-normal M stack
-    ordinary M-mode firmware execution
-
-trusted M trap stack
-    all runtime M-level traps: M->M, S->M, U->M
-
-S probe stack
-    supervisor payload
+Hostboot Base/kernel entry
+    -> task/scheduler foundation
+    -> VMM
+    -> VFS
+    -> PNOR Resource Provider
+    -> first user/service task
+    -> InitService
+    -> istep module execution
+    -> HWP calls
+    -> memory isteps
+    -> proc_exit_cache_contained
+    -> MM_EXTEND_REAL_MEMORY / VMM extension
 ```
 
-M00-06.03 proves the positive S->M->S ECALL path. M00-06.04 deliberately sets S-mode `sp = 0xdeadbeefdeadbeef` immediately before ECALL and proves the saved hostile value is never used as privileged TrapFrame storage. The TrapFrame remains aligned and entirely inside the current hart's trusted M trap stack. The probe then removes `mscratch -> HartLocal` and proves a second lower-origin ECALL enters the register-only fail-closed path rather than returning or dereferencing untrusted storage.
+### Required decisions before coding
 
-Machine-checkable M00-06.04 result:
+- exact Hostboot kernel/user startup boundary;
+- what must remain resident before DDR;
+- how VFS/PNOR fault handling interacts with task scheduling and Resource Providers;
+- InitService versus HWP/platform mechanism responsibilities;
+- host versus Boot Engine/Management Complex DDR ownership;
+- final RISC-V M/S/U mapping for Jixia kernel and services;
+- where seL4-style capabilities/address-space isolation should strengthen the Hostboot model;
+- where NXP-style component manifests/dependency packaging should be adopted.
 
-```text
-M00_06_04_BOUNDARY_ARMED: PASS
-M00_06_04_HOSTILE_SP_ENTRY: PASS
-M00_06_04_HOSTILE_SP_RETURN: PASS
-M00_06_04_NO_ANCHOR_ARMED: PASS
-M00-06.04 hostile lower-privilege boundary: PASS
-```
-
-CI evidence: GitHub Actions run `31664329150` passed formatting, build, all prior TrapFrame/recoverable/timer/Kernel Print regressions, M00-05 population tests, M00-06.02, M00-06.03, and M00-06.04.
-
-Design record: `docs/JIXIA_M00_06_PRIVILEGE_TRANSITION.md`.
-
-### Recorded limitations
-
-```text
-satp remains bare
-probe PMP is permissive and unlocked
-no S-mode trap delegation yet
-no production syscall ABI
-no U-mode service isolation
-no nested M-level trap support
-```
+No synthetic `ECALL -> initialize DDR` control flow will be used as a substitute for this architecture.
 
 ---
 
-## NOW — M00-07 Memory foundation
+## Management Complex boundary
 
-### Objective
-
-Implement the first end-to-end firmware memory lifecycle rather than only an allocator:
+Current direction:
 
 ```text
-flash / PNOR-equivalent image
-    -> resident Jixia Base
-    -> contained EarlyMemory domain
-    -> VMM/PageManager capable of flash-backed demand paging before DDR
-    -> fake DDR discovery/training/address-map state machine
-    -> DDR/System RAM becomes online
-    -> contained -> mainstore transition preserving firmware address identity
-    -> post-DDR flash-backed paging into DDR
-    -> retire contained EarlyMemory
+Boot Engine / prerequisite management
+    -> minimum reset, power, PLL/clock, RoT work needed to release host
+
+Host firmware
+    -> heavy HWP/istep work
+    -> DDR discovery/config/training/diagnostics
+    -> address-map and platform initialization
+
+Management Complex
+    -> always-on runtime/OOB plane
+    -> RAS aggregation and monitoring
+    -> telemetry
+    -> watchdog/recovery
+    -> power/thermal supervision
+    -> BMC communication
+    -> predictive health/rule execution
 ```
 
-The first QEMU version models the semantics of cache-contained memory; it does not pretend QEMU provides POWER-style L3 backing-cache hardware. The software abstraction is `EarlyMemory`/contained memory so a later SimSoc backend can be Boot SRAM, L2 CAR, L3 backing cache, or another implementation.
-
-### Primary invariant
-
-```text
-firmware object/address identity
-        !=
-current storage medium
-```
-
-The desired transition preserves stable firmware VA/PA identity where the platform model allows it. POWER Hostboot is the architectural reference: establish real DDR decode first, then stop execution, cast out/purge contained cache state into DDR at the same real addresses, exit contained mode, resume, and extend the allocator/VMM into remaining mainstore.
-
-For QEMU v0, the same contract may be implemented behaviorally; the upper Jixia layers must not depend on whether the contained backend is simulated or a real cache mode.
-
-### First acceptance target
-
-```text
-[ ] firmware image is sourced from a flash/PNOR-equivalent path rather than treated as ordinary DDR-resident payload
-[ ] only resident Base components are required before DDR
-[ ] pageable Extended content remains in flash
-[ ] a pre-DDR page fault is serviced from flash into EarlyMemory
-[ ] fake DDR lifecycle reaches ONLINE only after explicit training/layout/decode stages
-[ ] DDR System RAM is added to the resource/allocator view only after ONLINE
-[ ] contained -> mainstore transition preserves live firmware state without pointer-fixup semantics
-[ ] a post-DDR page fault is serviced from flash into DDR
-[ ] EarlyMemory retirement is explicit and machine-checkable
-[ ] existing M00-02..M00-06 regressions remain green
-```
-
-Research checkpoint: `docs/JIXIA_MEMORY_MANAGEMENT_RESEARCH.md`.
+Do not inflate Management Complex SRAM and firmware into a second Hostboot unless a real hardware dependency requires it.
 
 ---
 
-## NEXT queue
+## Planned queue after the research gate
 
-1. finish `M00-07 Memory foundation`
-2. `M00-08 Structured event and trace ABI`
-3. `M00-09 Automated QEMU test harness`
+The next implementation milestone identifier is deliberately TBD. Likely direction is a minimal Hostboot-style firmware service execution substrate.
 
-Only one architectural milestone is ACTIVE at a time.
-
----
-
-## Frozen implementation areas
+Existing planned work remains valid but may be reordered behind that prerequisite:
 
 ```text
-FROZEN  ArchHV and LPAR runtime
-FROZEN  HS/VS execution and G-stage translation
-FROZEN  virtual interrupt and virtual I/O
-FROZEN  Service LPAR
-FROZEN  confidential LPAR runtime
-FROZEN  migration
-FROZEN  simulator-dependent partition hardware experiments
+PLANNED  firmware task/service execution
+PLANNED  InitService/istep foundation
+PLANNED  typed IPC and capability ownership
+PLANNED  service address spaces and fault containment
+PLANNED  structured event and trace ABI
+PLANNED  consolidated QEMU harness
+PLANNED  PlatformGraph runtime model
+PLANNED  post-DDR memory continuation under real boot flow
 ```
 
-They are released only through the gates in `docs/JIXIA_SOLO_ROADMAP.md`.
+Only one primary implementation milestone is active at a time.
 
 ---
 
-## Branch/integration rule
+## Branch / integration rule
 
-Development branches may contain fine-grained implementation/debug commits. Accepted submilestones are squashed into `main` as semantic checkpoints. The next submilestone branch then advances from that clean checkpoint.
+Development branches may contain fine-grained commits. Accepted milestones are integrated into `main` as semantic checkpoints, normally by squash merge.
 
 ```text
 main
   |
-  +-- milestone/Mxx.xx branch
-          |
-          +-- implementation
-          +-- tests / CI
-          +-- design record
-          |
-          `-- squash accepted checkpoint into main
+  +-- milestone branch
+          -> implementation
+          -> tests / CI
+          -> design record
+          -> closure records
+          -> squash accepted checkpoint into main
 ```
 
-Do not build a long chain of completed milestone branches while leaving `main` stale.
+Do not leave a completed milestone branch unintegrated while `main` becomes stale.
 
 ---
 
 ## Progress history
 
-### 2026-08-13 — M00-06.04 accepted; M00-06 closed
+### 2026-08-17 — M00-07 accepted
 
-- Added a hostile lower-privilege x2/sp probe using `0xdeadbeefdeadbeef` immediately before S-mode ECALL.
-- Proved M trap entry preserves interrupted x2 only as a value and constructs the TrapFrame entirely on the trusted per-hart M trap stack.
-- Proved S-mode receives the hostile x2/sp and selected context registers unchanged after the controlled round trip.
-- Removed the trusted `mscratch -> HartLocal` anchor for a second S-mode ECALL and proved the existing no-anchor lower-origin path fails closed without returning.
-- Added `scripts/test-m00-06-04-privilege-boundary.sh` and CI coverage.
-- GitHub Actions run `31664329150` passed the complete regression chain.
-- M00-06 is closed; M00-07 Memory foundation is the single ACTIVE milestone.
+- Adopted FFS-based PNOR image construction and runtime parsing.
+- Proved pflash Stage0 -> resident JXBASE transfer.
+- Established explicit contained EarlyMemory and 4 KiB PageManager bootstrap pool.
+- Built Sv39 page tables before DDR.
+- Proved a real instruction page fault can page JXEXT from pflash into EarlyMemory and retry the original instruction.
+- Prototyped explicit DDR lifecycle and stable-address contained->mainstore semantics.
+- Found and fixed allocator publication ordering: PageManager metadata is prepared before DDR allocation becomes visible.
+- Removed the label-only `early_retired` memory-domain idea.
+- Full closure CI run `32005255564` passed all M00-02 through M00-07.04 regressions.
+- Closed M00-07 as Pre-DDR Memory Foundation.
+- Opened the Hostboot service/InitService startup research gate before the next implementation milestone.
 
-### 2026-08-12 — M00-06.03 accepted
+### 2026-08-13 — M00-06 closed
 
-- Added a dedicated M00-06.03 probe build without changing the default firmware ECALL policy.
-- Entered S-mode on the supervisor probe stack, emitted an S-only entry marker, loaded known `gp/a0/a7` markers, and executed ECALL.
-- Proved `mcause=9`, `mstatus.MPP=S`, expected ECALL `mepc`, saved S stack/register context, trusted M TrapFrame ownership/alignment, and `trap_active=1`.
-- Advanced saved `mepc` only after validation and returned through the common restore + `mret` path.
-- S-mode verified restored `sp/gp/a0/a7` before emitting the round-trip PASS marker.
-- Added shared assembly/C++ test markers to prevent probe-contract drift.
-- Added `.clang-format`, changed-line formatting checks, staged pre-commit checks, CI enforcement, and code-style documentation.
-- GitHub Actions run `31582257350` passed the complete regression chain including M00-06.02 and M00-06.03.
-- Next submilestone: M00-06.04 hostile lower-privilege stack and full boundary acceptance.
+- Hostile lower-privilege x2/sp proof accepted.
+- Trusted M TrapFrame storage remained on the per-hart trap stack.
+- Missing `mscratch -> HartLocal` lower-origin path failed closed.
+- M00-07 Memory Foundation activated.
 
-### 2026-08-12 — M00-06.02 accepted
+### 2026-08-11 to 2026-08-12 — M00-05/M00-06 foundation
 
-- Added a dedicated trusted runtime M trap stack for every hart.
-- Unified runtime M-level trap storage: M-origin and lower-origin traps both construct TrapFrames on the per-hart trap stack.
-- Preserved the interrupted x2/sp value before switching stack domains.
-- Added fail-closed detection for unsupported nested/double M-level traps.
-- TrapFrame regression now verifies that the frame resides on trusted trap-stack storage.
-- Added the first controlled one-way M->S transition with `satp=0`, no delegation, and interrupts disabled.
-- The first CI attempt exposed an S-mode instruction-access fault; the trusted M trap path safely captured it.
-- Added a permissive, unlocked PMP probe entry so S-mode can execute/use its stack/UART without claiming isolation.
-- GitHub Actions run `31568251600` passed all old regressions plus `M00-06.02 supervisor transition`.
-- Next submilestone: M00-06.03 S->M ECALL round trip.
+- SMP population, HartLocal, per-hart stacks/timers accepted.
+- Controlled M->S and S->M->S paths accepted.
+- Repository formatting and CI enforcement established.
 
-### 2026-08-11 — M00-06 activated
-
-- M00-05 closure records were integrated into `main`.
-- New branch: `milestone/m00-06-privilege-transition`.
-- The initial M00-06 experiment is constrained to M->S->M with `satp = 0`.
-- Trusted per-hart trap-stack entry is the primary correctness/security problem.
-
-### 2026-08-11 — M00-05 accepted and integrated
-
-- User confirmed the complete population/SMP timer regression matrix passed on the development workstation.
-- Supported QEMU populations: 1, 2, and 4 harts.
-- Five harts exceed current capacity and are rejected through the controlled failure path.
-- M00-05 design/invariant record added as `docs/JIXIA_M00_05_SMP_FOUNDATION.md`.
-- Host TSan remains deferred tooling work and does not block milestone acceptance.
-
-### 2026-08-07 — repository baseline consolidated
-
-- M00-02, M00-03, and M00-04 integrated through PR #6.
-- Console/timer conflict-resolved integration merged through PR #8.
-- CMake, firmware entry, trap dispatch, diagnostics, linker rules, and regression scripts preserve both timer and console foundations.
-
-### 2026-08-05 — project execution process established
-
-- One primary architectural milestone at a time.
-- Persistent records: `PROJECT_CONTEXT.md`, `docs/JIXIA_SOLO_ROADMAP.md`, and this ledger.
+Earlier milestone details remain in their dedicated design records and Git history.

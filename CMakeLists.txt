@@ -32,14 +32,34 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_07_03_PROBE
+    "Boot the M00-07.03 pre-DDR pflash-backed Sv39 paging probe"
+    OFF
+)
+
+option(
+    JIXIA_M00_07_04_PROBE
+    "Boot the M00-07.04 fake DDR and contained-to-mainstore transition probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
-    -march=rv64imac_zicsr
+    -march=rv64imac_zicsr_zifencei
     -mabi=lp64
     -mcmodel=medany
 )
 
 set(JIXIA_LINKER_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt.ld
+)
+
+set(JIXIA_STAGE0_LINKER_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt_stage0.ld
+)
+
+set(JIXIA_PAGEABLE_PROBE_LINKER_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/linker/qemu_virt_pageable_probe.ld
 )
 
 # CMAKE_OBJCOPY/CMAKE_OBJDUMP/CMAKE_READELF are FILEPATH cache variables.
@@ -108,7 +128,9 @@ add_executable(
     microkernel/arch/riscv/trap_frame_test.S
     microkernel/arch/riscv/privilege_transition_test.S
     microkernel/arch/riscv/privilege_boundary_test.S
+    microkernel/arch/riscv/pre_ddr_paging_test.S
     microkernel/arch/riscv/instruction_decode.cpp
+    microkernel/arch/riscv/sv39.cpp
 
     lib/format.cpp
     microkernel/console/kernel_console.cpp
@@ -116,12 +138,20 @@ add_executable(
     microkernel/core/firmware_main.cpp
     microkernel/core/trap.cpp
     microkernel/core/privilege_boundary_test.cpp
+    microkernel/core/pre_ddr_paging_test.cpp
+    microkernel/core/mainstore_transition_test.cpp
     microkernel/core/timer.cpp
     microkernel/core/smp_timer_test.cpp
     microkernel/core/kernel_print_test.cpp
     microkernel/core/recoverable_trap_test.cpp
     microkernel/core/timer_interrupt_test.cpp
     microkernel/core/trap_frame_test.cpp
+    microkernel/firmware_store/ffs.cpp
+    microkernel/memory/memory_lifecycle.cpp
+    microkernel/memory/page_manager.cpp
+    microkernel/memory/flash_provider.cpp
+    platform/qemu_virt/contained_memory.cpp
+    platform/qemu_virt/ddr.cpp
     platform/qemu_virt/timer.cpp
     platform/qemu_virt/uart.c
     microkernel/arch/riscv/hart_layout.h
@@ -162,6 +192,22 @@ if(JIXIA_M00_06_04_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_06_04_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_07_03_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_07_03_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_07_04_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_07_04_PROBE=1
     )
 endif()
 
@@ -237,4 +283,125 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/jixia.readelf
 
     COMMENT "Generating Jixia firmware image and inspection files"
+)
+
+# M00-07.01: a tiny stackless XIP Stage0 linked at QEMU virt pflash0 base.
+add_executable(
+    jixia_stage0.elf
+    boot/qemu_virt/stage0.S
+)
+
+target_include_directories(
+    jixia_stage0.elf
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_compile_options(
+    jixia_stage0.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+)
+
+target_link_options(
+    jixia_stage0.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--build-id=none
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.map
+        -T${JIXIA_STAGE0_LINKER_SCRIPT}
+)
+
+set_property(
+    TARGET jixia_stage0.elf
+    APPEND PROPERTY LINK_DEPENDS ${JIXIA_STAGE0_LINKER_SCRIPT}
+)
+
+add_custom_command(
+    TARGET jixia_stage0.elf
+    POST_BUILD
+
+    COMMAND
+        ${JIXIA_OBJCOPY}
+        -O binary
+        $<TARGET_FILE:jixia_stage0.elf>
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.bin
+
+    COMMAND
+        ${JIXIA_OBJDUMP}
+        -d
+        -S
+        $<TARGET_FILE:jixia_stage0.elf>
+        >
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.dis
+
+    COMMAND
+        ${JIXIA_READELF}
+        -a
+        $<TARGET_FILE:jixia_stage0.elf>
+        >
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_stage0.readelf
+
+    COMMENT "Generating Jixia pflash Stage0 image and inspection files"
+)
+
+# M00-07.03: one pflash-resident page linked for a deliberately unmapped S VA.
+add_executable(
+    jixia_pageable_probe.elf
+    boot/qemu_virt/pageable_probe.S
+)
+
+target_include_directories(
+    jixia_pageable_probe.elf
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_compile_options(
+    jixia_pageable_probe.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+)
+
+target_link_options(
+    jixia_pageable_probe.elf
+    PRIVATE
+        ${JIXIA_ARCH_FLAGS}
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--build-id=none
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia_pageable_probe.map
+        -T${JIXIA_PAGEABLE_PROBE_LINKER_SCRIPT}
+)
+
+set_property(
+    TARGET jixia_pageable_probe.elf
+    APPEND PROPERTY LINK_DEPENDS ${JIXIA_PAGEABLE_PROBE_LINKER_SCRIPT}
+)
+
+add_custom_command(
+    TARGET jixia_pageable_probe.elf
+    POST_BUILD
+
+    COMMAND
+        ${JIXIA_OBJCOPY}
+        -O binary
+        $<TARGET_FILE:jixia_pageable_probe.elf>
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_pageable_probe.bin
+
+    COMMAND
+        ${JIXIA_OBJDUMP}
+        -d
+        -S
+        $<TARGET_FILE:jixia_pageable_probe.elf>
+        >
+        ${CMAKE_CURRENT_BINARY_DIR}/jixia_pageable_probe.dis
+
+    COMMENT "Generating M00-07.03 pageable Extended-image probe"
 )
