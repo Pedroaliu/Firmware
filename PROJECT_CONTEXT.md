@@ -9,13 +9,16 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation`
+- **Current implementation milestone:** `M00-08 Boot Service Execution Foundation`
 - **Project type:** RISC-V firmware-native server platform research project
 
-Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, or any single existing firmware stack.
+Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
 
 Canonical live status: `docs/JIXIA_PROGRESS.md`.
 
 Canonical execution plan: `docs/JIXIA_SOLO_ROADMAP.md`.
+
+Current boot/runtime architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
 ## 2. Architecture reference priority
 
@@ -52,11 +55,17 @@ Whole-system firmware boot flow is Hostboot-first.
    - versioning
    - standardized package/service boundaries
 
-5. Linux/other operating systems
+5. OpenSBI
+   primary RISC-V SBI/runtime reference implementation and compatibility oracle
+   not the authoritative Jixia runtime owner
+
+6. Linux/other operating systems
    implementation and comparison reference where applicable
 ```
 
 Do not invent a generic microkernel boot flow first and retrofit firmware behavior later. For boot, memory, PNOR, istep/HWP, runtime transition, and RAS lifecycle questions, inspect Hostboot first.
+
+For SBI behavior and compatibility, inspect the SBI specification and OpenSBI first, but preserve Jixia ownership of machine-level runtime state.
 
 ## 3. Host versus Management Complex boundary
 
@@ -74,7 +83,7 @@ Boot Engine / minimum prerequisite logic
 
 Host Jixia firmware
     -> make the platform operational
-    -> microkernel and services
+    -> microkernel and boot services
     -> InitService / istep orchestration
     -> heavy HWP libraries
     -> processor/fabric initialization
@@ -92,9 +101,17 @@ Management Complex
     -> power/thermal supervision
     -> BMC/OOB communication
     -> predictive RAS/rule execution and health monitoring
+
+Jixia M Runtime
+    -> persistent host-side machine authority after boot services are destroyed
+    -> SBI
+    -> machine-level RAS containment/notification
+    -> security/trust continuity
+    -> confidential-computing hooks/state
+    -> Management Complex coordination
 ```
 
-Heavy boot algorithms should remain on host cores where resident Base + contained memory + PNOR demand paging can support code larger than the early-memory capacity. Avoid requiring a large Management Complex SRAM merely to execute host initialization libraries.
+Heavy boot algorithms remain on host cores where resident Base + contained memory + PNOR demand paging can support code larger than the early-memory capacity. Avoid requiring a large Management Complex SRAM merely to execute host initialization libraries.
 
 ## 4. Development model
 
@@ -143,38 +160,125 @@ Jixia is the project and product brand. Chinese cultural names are implementatio
 
 Source directories, interfaces, types, functions, schemas, and C++ namespaces use clear English technical names.
 
-## 6. Long-term execution profiles
+## 6. Privilege and lifecycle architecture
+
+### Boot Realm
+
+Production Jixia boot-service placement is now frozen as:
 
 ```text
-NATIVE_HOST
-    Boot0/microkernel -> native HS-mode Linux -> KVM guests
+M-mode
+    Jixia microkernel
+    bare / physical address domain
+    trap, task, scheduler, VMM, PageManager, IPC, capability enforcement
 
-SINGLE_LPAR
-    Boot0/microkernel -> ArchHV -> one VS-mode logical partition
+S-mode
+    intentionally unused by Jixia boot services
+    reserved for later OS/hypervisor use
 
-MULTI_LPAR
-    Boot0/microkernel -> ArchHV -> multiple peer logical partitions
+U-mode
+    disposable firmware boot services
+    Sv39-translated service/task address spaces
+    InitService, PNOR/VFS providers, MemoryInit, FabricInit, PCIe/CXL init, etc.
 ```
 
-Do not prematurely map Hostboot's logical kernel/user split directly onto RISC-V M/S/U privilege levels. M00-06/07 S-mode code is currently an acceptance context, not the final service model. Production M/S/U placement will be decided after studying the Hostboot kernel/VFS/InitService startup path and defining Jixia service isolation requirements.
+M00-06/M00-07 S-mode code remains acceptance/probe machinery only.
 
-## 7. Architectural baseline
+A task must carry an explicit VSpace/address-space identity. The first implementation may share one simple root, but APIs must not assume one global `satp`.
 
-Core principles:
+Normal M-mode kernel execution remains physical/bare. Kernel code must not directly dereference U virtual pointers as physical pointers; future user-memory access uses explicit copy/translation helpers.
 
-1. Hostboot-first firmware lifecycle and flow.
-2. Platform model before OS-facing projections.
-3. The microkernel owns minimum trusted mechanisms, not every feature.
-4. Global boot orchestration belongs to host firmware.
-5. The Management Complex remains an always-on management/RAS control plane, not a heavy alternate host.
-6. Complex device drivers should not inflate the minimum trusted kernel/hypervisor.
-7. Resource ownership has one authoritative manager.
-8. Message passing and explicit capabilities are preferred over shared implicit authority.
-9. Protection, detection, diagnosis, and recovery are separate mechanisms.
-10. Debug/replay/fault injection are first-class architecture features.
-11. Firmware and Jingjie are co-designed.
+### Boot-service teardown
 
-## 8. Accepted implementation through M00-07
+Boot U-mode services are ephemeral firmware processes. They cannot be permanent runtime dependencies.
+
+Future `exit_boot_services()` tears down boot tasks, VSpaces, stacks, IPC endpoints, and boot-scoped capabilities before the system software world takes ownership.
+
+### Runtime Realm
+
+After boot-service teardown:
+
+```text
+Native:
+    M   Jixia Runtime
+    S   Linux / OS kernel
+    U   applications
+
+Virtualized:
+    M   Jixia Runtime
+    HS  host hypervisor / host kernel
+    VS  guest kernel
+    VU  guest applications
+```
+
+## 7. Native SBI/runtime policy
+
+Jixia Runtime implements the RISC-V SBI standard ABI with Jixia-owned mechanisms.
+
+OpenSBI is used as:
+
+```text
+reference implementation
+compatibility target
+differential oracle
+implementation study source
+```
+
+Do not make the complete OpenSBI `lib/sbi` the authoritative Jixia runtime core. It contains far more than ecall decoding: trap handling, hart/HSM state, domains, PMP/protection, IPI, timer, TLB, interrupt/PMU integration, heap/scratch, and other M-mode executive mechanisms.
+
+The architectural reason for a native runtime is not that real silicon never integrates OpenSBI; some platforms do. The reason is that Jixia must retain one authoritative owner for machine-level RAS, security, confidential-computing, trap/delegation, hart, and protection state.
+
+Selective leaf code reuse is allowed only when ownership remains explicit and non-overlapping.
+
+## 8. Component and loader direction
+
+ELF remains the compiler/build-time interchange format.
+
+Preferred firmware flow:
+
+```text
+ELF component
+    -> Jixia image builder
+    -> validation / relocation / layout
+    -> component catalog/manifest
+       identity
+       entry
+       virtual ranges
+       permissions
+       backing object
+       dependencies
+       later capabilities/hash/signature metadata
+    -> PNOR image
+```
+
+Pre-DDR runtime starts preprocessed components through the catalog rather than implementing a Linux-style general dynamic ELF loader.
+
+The resident root component registry/provider bootstrap must not recursively depend on the pageable component world it creates.
+
+## 9. Page-fault/provider direction
+
+M00-07 proved direct kernel-side PNOR materialization. The target service model is:
+
+```text
+U service page fault
+    -> M VMM
+    -> locate VmRegion/backing
+    -> allocate physical page
+    -> send Resource Provider request
+    -> block faulting task
+    -> schedule resident/pinned provider
+    -> provider fills page from PNOR/backing store
+    -> response to kernel
+    -> install PTE
+    -> wake original task
+    -> retry exact instruction
+```
+
+The page fault repairs backing and resumes execution. It does not drive boot-phase state machines such as DDR initialization.
+
+Read-side pageable backing and persistent PNOR mutation remain separate authority paths.
+
+## 10. Accepted implementation through M00-07
 
 ### M00-00 through M00-04
 
@@ -216,7 +320,7 @@ hostile S sp proof
 missing HartLocal anchor fails closed
 ```
 
-M00-06 does not yet define the production service privilege model.
+M00-06 does not define the production service privilege model; the production model is M-mode kernel + U-mode boot services.
 
 ### M00-07 — Pre-DDR Memory Foundation
 
@@ -249,36 +353,31 @@ Primary full-regression evidence: GitHub Actions run `32005255564`.
 
 M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainstore code is a mechanism prototype used to establish invariants for the later Hostboot-style flow.
 
-## 9. Immediate next architecture research gate
+## 11. Current implementation — M00-08
 
-Before the next major implementation milestone, study Hostboot startup end-to-end:
+M00-08 Boot Service Execution Foundation is ACTIVE.
+
+Planned increments:
 
 ```text
-Hostboot Base/kernel entry
-    -> task/thread foundation
-    -> VMM
-    -> VFS and PNOR Resource Provider
-    -> initial user/service execution
-    -> InitService
-    -> istep module loading/execution
-    -> HWP invocation
-    -> memory isteps
-    -> proc_exit_cache_contained
-    -> MM_EXTEND_REAL_MEMORY / VMM mainstore extension
+08.01  TaskContext + M bare -> U task -> ECALL -> M
+08.02  minimal scheduler/task state/idle
+08.03  minimum task syscalls
+08.04  message queue + blocking/wakeup IPC
+08.05  resident Root Component Registry
+08.06  init_main -> registry -> InitService
+08.07  minimal Base InitService lifecycle
 ```
 
-Questions to settle before implementing Jixia services:
+Immediate work begins with M00-08.01 by reviewing M00-06 privilege-transition code, M00-07 Sv39 primitives, and the accepted TrapFrame. Reusable mechanisms should be promoted into a real `TaskContext`/dispatch ABI instead of extending the synthetic S-mode probes.
 
-- When does Hostboot first leave pure kernel/bootstrap execution and start user/service tasks?
-- Which pieces must remain resident before DDR?
-- How do VFS/PNOR page faults block and resume a task/provider?
-- What is the ownership boundary between InitService, HWP/platform code, and kernel VMM mechanisms?
-- What RISC-V M/S/U mapping best preserves Hostboot-style flow while improving protection?
-- At what exact point should host-driven DDR initialization occur?
+## 12. Next provider-backed component milestone
 
-Only after this research gate should the next service/InitService implementation milestone be frozen.
+After real tasks/scheduler/IPC exist, introduce the production page-fault Resource Provider model and extended component catalog. This replaces direct trap-to-FlashProvider materialization.
 
-## 10. Deferred memory continuation
+Only after this provider model and InitService exist should DDR initialization re-enter the implementation roadmap.
+
+## 13. Deferred memory continuation
 
 Later, under the real Hostboot-style boot flow:
 
@@ -288,7 +387,7 @@ InitService / memory isteps
     -> address map / decode viable
     -> exit contained
     -> mainstore/VMM extension
-    -> continue service execution
+    -> continue the same firmware/service execution
     -> natural post-DDR PNOR-backed page fault
     -> allocate DDR backing
     -> prove pre-DDR page tables and mappings survived the transition
@@ -296,7 +395,7 @@ InitService / memory isteps
 
 Real cache-contained retirement and dirty-line castout semantics belong to Jingjie/real hardware validation rather than the QEMU semantic model alone.
 
-## 11. PNOR persistence direction
+## 14. PNOR persistence direction
 
 M00-07 paging establishes read-side backing. Persistent mutation follows a separate rule:
 
@@ -304,19 +403,31 @@ M00-07 paging establishes read-side backing. Persistent mutation follows a separ
 
 Ordinary CPU stores must never implicitly write firmware storage. Immutable firmware partitions are RO/RX; future updates/VPD/GUARD/config persistence use explicit scoped services and capabilities.
 
-## 12. RAS direction
+## 15. RAS direction
 
 Power-style deterministic RAS diagnosis remains the trusted spine. Jixia extends it with structured evidence, topology/ownership correlation, active HWP probes, case memory, replay, and optional AI-assisted hypothesis/rule discovery while keeping accepted recovery policy deterministic and auditable.
 
-The Management Complex is especially important for host-independent runtime RAS collection, monitoring, watchdog, telemetry, and OOB recovery coordination.
+Runtime authority is intentionally layered:
 
-## 13. Read-first order for future sessions
+```text
+Management Complex
+    host-independent collection/monitoring/OOB recovery coordination
+
+Jixia M Runtime
+    machine architectural containment, SBI/event delivery, security state
+
+S/HS system software
+    process/page/VM/workload recovery
+```
+
+## 16. Read-first order for future sessions
 
 1. `PROJECT_CONTEXT.md`
 2. `docs/JIXIA_PROGRESS.md`
 3. `docs/JIXIA_SOLO_ROADMAP.md`
-4. `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`
-5. relevant architecture/RAS records
-6. current branch, recent commits, and current code
+4. `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
+5. `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`
+6. relevant architecture/RAS records
+7. current branch, recent commits, and current code
 
 Repository state wins over remembered chat state whenever they differ.
