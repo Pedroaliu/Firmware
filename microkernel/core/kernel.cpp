@@ -81,8 +81,8 @@ bool Kernel::init_task_bootstrap() {
     const task::EntryPoint entry = reinterpret_cast<task::EntryPoint>(jixia_user_init_task);
 #endif
 
-    task::Task* initial = task::TaskManager::instance().create_task(
-        entry, 0U, address_space, boot, true);
+    task::Task* initial =
+        task::TaskManager::instance().create_task(entry, 0U, address_space, boot, true);
     if (initial == nullptr) {
         return false;
     }
