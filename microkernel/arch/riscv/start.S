@@ -39,6 +39,21 @@ jixia_boot_release:
 
 .size jixia_boot_release, . - jixia_boot_release
 
+.balign 4
+.global jixia_executive_release
+.type jixia_executive_release, @object
+
+jixia_executive_release:
+    /*
+     * Hostboot-shaped second release gate:
+     *
+     *   0 = per-hart executive objects are not ready
+     *   1 = CpuManager, idle tasks, scheduler, and init task are ready
+     */
+    .word 0
+
+.size jixia_executive_release, . - jixia_executive_release
+
 /*
  * Private per-hart early/kernel stacks.
  *
@@ -320,3 +335,38 @@ __hart_trap_stacks_end:
 
 
  .size _start, . - _start
+
+
+/*
+ * The executive gate lives in start.S because its ordering is part of the
+ * reset-to-runtime ISA contract. C++ invokes these small helpers only after
+ * every hart already owns a stack and HartLocal anchor.
+ */
+.balign 4
+.global jixia_wait_for_executive_release
+.type jixia_wait_for_executive_release, @function
+
+jixia_wait_for_executive_release:
+    la t0, jixia_executive_release
+
+.Lexecutive_release_poll:
+    lw t1, 0(t0)
+    beqz t1, .Lexecutive_release_poll
+    fence r, rw
+    ret
+
+.size jixia_wait_for_executive_release, . - jixia_wait_for_executive_release
+
+
+.balign 4
+.global jixia_release_executive_harts
+.type jixia_release_executive_harts, @function
+
+jixia_release_executive_harts:
+    fence rw, w
+    la t0, jixia_executive_release
+    li t1, 1
+    sw t1, 0(t0)
+    ret
+
+.size jixia_release_executive_harts, . - jixia_release_executive_harts

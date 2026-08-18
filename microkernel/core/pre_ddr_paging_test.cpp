@@ -23,7 +23,6 @@ using jixia::arch::riscv::TrapCause;
 using jixia::arch::riscv::TrapFrame;
 using jixia::arch::riscv::Xlen;
 using jixia::arch::riscv::sv39::AddressSpace;
-using jixia::arch::riscv::sv39::Asid;
 using jixia::microkernel::memory::BackingKind;
 using jixia::microkernel::memory::Snapshot;
 using jixia::microkernel::memory::page_manager::Allocation;
@@ -185,7 +184,7 @@ extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe() {
         hart::park();
     }
 
-    const uint64_t satp = jixia::arch::riscv::sv39::satp_value(g_address_space, Asid{0U});
+    const uint64_t satp = jixia::arch::riscv::sv39::satp_value(g_address_space);
     jixia::arch::riscv::sv39::fence_all();
 
     printk(

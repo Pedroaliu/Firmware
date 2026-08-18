@@ -7,8 +7,6 @@ namespace {
 
 using jixia::microkernel::memory::page_manager::Allocation;
 
-constexpr unsigned kSatpAsidShift = 44U;
-
 constexpr uint64_t kPpnMask = (1ULL << 44U) - 1ULL;
 constexpr uint64_t kLeafMask = PteFlag::read | PteFlag::write | PteFlag::execute;
 
@@ -126,13 +124,12 @@ bool map_range_4k(const AddressSpace& address_space, uintptr_t virtual_base,
     return true;
 }
 
-uint64_t satp_value(const AddressSpace& address_space, Asid asid) {
+uint64_t satp_value(const AddressSpace& address_space) {
     if (!address_space.valid()) {
         return 0U;
     }
 
-    return kSatpModeSv39 | (static_cast<uint64_t>(asid) << kSatpAsidShift) |
-           static_cast<uint64_t>(address_space.root_physical_address >> 12U);
+    return kSatpModeSv39 | static_cast<uint64_t>(address_space.root_physical_address >> 12U);
 }
 
 void fence_all() {

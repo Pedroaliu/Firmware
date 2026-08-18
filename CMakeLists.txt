@@ -44,6 +44,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_08_01_PROBE
+    "Boot the M00-08.01 Hostboot-shaped task lifecycle probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -129,14 +135,26 @@ add_executable(
     microkernel/arch/riscv/privilege_transition_test.S
     microkernel/arch/riscv/privilege_boundary_test.S
     microkernel/arch/riscv/pre_ddr_paging_test.S
+    microkernel/arch/riscv/task_dispatch.S
+    microkernel/arch/riscv/user_task.S
     microkernel/arch/riscv/instruction_decode.cpp
     microkernel/arch/riscv/sv39.cpp
 
     lib/format.cpp
+    lib/memory.cpp
     microkernel/console/kernel_console.cpp
     microkernel/console/printk.cpp
     microkernel/core/firmware_main.cpp
+    microkernel/core/kernel.cpp
     microkernel/core/trap.cpp
+    microkernel/core/task_context.cpp
+    microkernel/core/task_manager.cpp
+    microkernel/core/task_syscall.cpp
+    microkernel/core/scheduler.cpp
+    microkernel/core/heap_manager.cpp
+    microkernel/core/vmm_manager.cpp
+    microkernel/core/time_manager.cpp
+    microkernel/core/cpu_manager.cpp
     microkernel/core/privilege_boundary_test.cpp
     microkernel/core/pre_ddr_paging_test.cpp
     microkernel/core/mainstore_transition_test.cpp
@@ -161,7 +179,6 @@ add_executable(
     microkernel/arch/riscv/hart_layout_defs.h
     lib/fdt.h
     lib/fdt.cpp
-        microkernel/core/task_context.cpp
 )
 
 target_include_directories(
@@ -209,6 +226,14 @@ if(JIXIA_M00_07_04_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_07_04_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_08_01_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_08_01_PROBE=1
     )
 endif()
 

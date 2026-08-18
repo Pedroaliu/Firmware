@@ -11,8 +11,12 @@
 #include "microkernel/arch/riscv/hart_layout.h"
 #include "microkernel/arch/riscv/hart_local_abi.h"
 
+namespace jixia::microkernel::scheduler {
+class Scheduler;
+}
+
 namespace jixia::microkernel::task {
-struct TaskContext;
+struct Task;
 }
 
 namespace jixia::microkernel::hart {
@@ -95,10 +99,15 @@ struct alignas(64) HartLocal
     uint32_t trap_reserved;
 
     /*
-     * Only identifies the task currently running on this hart.
-     * The user register context remains owned by TaskContext.
+     * Hostboot-style per-CPU executive state. Global policy and queues live
+     * in Singleton managers; only ownership that differs per hart lives here.
      */
-    task::TaskContext* current_task;
+    task::Task* current_task;
+    scheduler::Scheduler* scheduler;
+    void* scheduler_extra;
+    void* delay_list;
+    task::Task* idle_task;
+    uintptr_t timeslice_ticks;
 };
 
 
@@ -148,9 +157,15 @@ static_assert(
 static_assert(
     offsetof(HartLocal, trap_reserved) ==
     HART_LOCAL_TRAP_RESERVED_OFFSET);
+static_assert(offsetof(HartLocal, current_task) == HART_LOCAL_CURRENT_TASK_OFFSET);
+static_assert(offsetof(HartLocal, scheduler) == HART_LOCAL_SCHEDULER_OFFSET);
+static_assert(offsetof(HartLocal, scheduler_extra) == HART_LOCAL_SCHEDULER_EXTRA_OFFSET);
+static_assert(offsetof(HartLocal, delay_list) == HART_LOCAL_DELAY_LIST_OFFSET);
+static_assert(offsetof(HartLocal, idle_task) == HART_LOCAL_IDLE_TASK_OFFSET);
+static_assert(offsetof(HartLocal, timeslice_ticks) == HART_LOCAL_TIMESLICE_TICKS_OFFSET);
 static_assert(sizeof(HartLocal) == HART_LOCAL_SIZE);
 static_assert(alignof(HartLocal) == 64U);
-static_assert(offsetof(HartLocal, current_task) == HART_LOCAL_CURRENT_TASK_OFFSET);
+
 
 [[nodiscard]]
 HartLocal& initialize(
@@ -162,10 +177,7 @@ HartLocal& initialize(
 [[nodiscard]]
 HartLocal& current();
 
-
-[[nodiscard]]
-const HartLocal* table();
-
+[[nodiscard]] HartLocal* table();
 
 [[nodiscard]]
 bool all_online(HartIndex expected_count);

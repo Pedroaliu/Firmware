@@ -20,7 +20,6 @@ enum PteFlag : uint64_t {
 };
 
 using PteFlags = uint64_t;
-using Asid = uint16_t;
 
 struct AddressSpace {
     uintptr_t root_physical_address;
@@ -44,7 +43,7 @@ struct AddressSpace {
 [[nodiscard]] bool map_range_4k(const AddressSpace& address_space, uintptr_t virtual_base,
                                 uintptr_t physical_base, size_t size, PteFlags flags);
 
-[[nodiscard]] uint64_t satp_value(const AddressSpace& address_space, Asid asid);
+[[nodiscard]] uint64_t satp_value(const AddressSpace& address_space);
 
 /** Publish page-table changes for the current hart. */
 void fence_all();
