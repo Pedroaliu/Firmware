@@ -23,6 +23,7 @@
 #define HART_LOCAL_TRAP_STACK_TOP_OFFSET        72
 #define HART_LOCAL_TRAP_ACTIVE_OFFSET           80
 #define HART_LOCAL_TRAP_RESERVED_OFFSET         84
+#define HART_LOCAL_CURRENT_TASK_OFFSET 88
 
 /* alignas(64) rounds the 88-byte payload up to 128 bytes. */
 #define HART_LOCAL_SIZE                         128

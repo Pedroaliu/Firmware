@@ -83,7 +83,7 @@ HartLocal& initialize(
     local.trap_entry_t1 = 0U;
     local.trap_active = 0U;
     local.trap_reserved = 0U;
-
+    local.current_task = nullptr;
 
     const uintptr_t stack_base =
         reinterpret_cast<uintptr_t>(__hart_stacks_start)

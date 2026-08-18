@@ -161,6 +161,7 @@ add_executable(
     microkernel/arch/riscv/hart_layout_defs.h
     lib/fdt.h
     lib/fdt.cpp
+        microkernel/core/task_context.cpp
 )
 
 target_include_directories(

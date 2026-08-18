@@ -11,6 +11,9 @@
 #include "microkernel/arch/riscv/hart_layout.h"
 #include "microkernel/arch/riscv/hart_local_abi.h"
 
+namespace jixia::microkernel::task {
+struct TaskContext;
+}
 
 namespace jixia::microkernel::hart {
 
@@ -90,6 +93,12 @@ struct alignas(64) HartLocal
      */
     uint32_t trap_active;
     uint32_t trap_reserved;
+
+    /*
+     * Only identifies the task currently running on this hart.
+     * The user register context remains owned by TaskContext.
+     */
+    task::TaskContext* current_task;
 };
 
 
@@ -141,7 +150,7 @@ static_assert(
     HART_LOCAL_TRAP_RESERVED_OFFSET);
 static_assert(sizeof(HartLocal) == HART_LOCAL_SIZE);
 static_assert(alignof(HartLocal) == 64U);
-
+static_assert(offsetof(HartLocal, current_task) == HART_LOCAL_CURRENT_TASK_OFFSET);
 
 [[nodiscard]]
 HartLocal& initialize(
