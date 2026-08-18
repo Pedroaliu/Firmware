@@ -23,6 +23,12 @@
 #define HART_LOCAL_TRAP_STACK_TOP_OFFSET        72
 #define HART_LOCAL_TRAP_ACTIVE_OFFSET           80
 #define HART_LOCAL_TRAP_RESERVED_OFFSET         84
+#define HART_LOCAL_CURRENT_TASK_OFFSET 88
+#define HART_LOCAL_SCHEDULER_OFFSET 96
+#define HART_LOCAL_SCHEDULER_EXTRA_OFFSET 104
+#define HART_LOCAL_DELAY_LIST_OFFSET 112
+#define HART_LOCAL_IDLE_TASK_OFFSET 120
+#define HART_LOCAL_TIMESLICE_TICKS_OFFSET 128
 
-/* alignas(64) rounds the 88-byte payload up to 128 bytes. */
-#define HART_LOCAL_SIZE                         128
+/* alignas(64) rounds the 136-byte payload up to 192 bytes. */
+#define HART_LOCAL_SIZE 192

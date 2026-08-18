@@ -52,6 +52,22 @@ SECTIONS
         __rodata_end = .;
     } > RAM :text
 
+    /*
+     * Resident bootstrap U-mode code. It is deliberately isolated from the
+     * M-mode .text mapping so VmmManager can grant U execute permission to a
+     * narrow page instead of exposing the kernel image.
+     */
+    .user_text : ALIGN(4096)
+    {
+        __user_text_start = .;
+
+        KEEP(*(.user.text))
+        KEEP(*(.user.text.*))
+
+        . = ALIGN(4096);
+        __user_text_end = .;
+    } > RAM :text
+
     .data : ALIGN(4096)
     {
         __data_start = .;

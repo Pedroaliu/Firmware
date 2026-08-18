@@ -3,6 +3,7 @@
 #include "microkernel/console/kernel_console.h"
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
+#include "microkernel/core/kernel.h"
 #include "microkernel/core/smp_timer_test.h"
 #include "microkernel/memory/memory_lifecycle.h"
 #include "lib/fdt.h"
@@ -17,6 +18,7 @@ extern "C" [[noreturn]] void jixia_m00_06_03_enter_supervisor_ecall();
 extern "C" [[noreturn]] void jixia_m00_06_04_enter_supervisor_boundary();
 extern "C" [[noreturn]] void jixia_m00_07_03_run_pre_ddr_paging_probe();
 extern "C" [[noreturn]] void jixia_m00_07_04_run_mainstore_transition_probe();
+extern "C" void jixia_wait_for_executive_release();
 
 namespace jixia::microkernel {
 namespace {
@@ -254,6 +256,12 @@ void boot_main(
      * identity before remaining mainstore is handed to PageManager.
      */
     jixia_m00_07_04_run_mainstore_transition_probe();
+#elif defined(JIXIA_M00_08_01_PROBE)
+    /*
+     * Build the first Hostboot-shaped executive and dispatch a real U task.
+     * This path does not call the task as an M-mode C++ function.
+     */
+    Kernel::instance().bootstrap(present_count);
 #else
     /* Parks the boot hart after validating the saved context. */
     jixia_trap_frame_test();
@@ -276,14 +284,20 @@ void secondary_main(
         hart::HartRole::secondary);
     (void)secondary_local;
 
-    /*
-     * Secondary harts participate only in the bounded M00-05 SMP timer probe,
-     * then permanently park. This is still not arbitrary work dispatch or a
-     * scheduler.
-     */
+    /* Preserve the established per-hart timer proof before runtime release. */
     smp_timer_test::run_secondary();
 
+#ifdef JIXIA_M00_08_01_PROBE
+    /*
+     * The boot hart publishes this gate only after it has created every
+     * per-hart scheduler/idle-task object. Waiting before Kernel::instance()
+     * also preserves the boot-hart-first Singleton construction rule.
+     */
+    jixia_wait_for_executive_release();
+    Kernel::instance().secondary_bootstrap();
+#else
     hart::park();
+#endif
 }
 
 

@@ -83,7 +83,12 @@ HartLocal& initialize(
     local.trap_entry_t1 = 0U;
     local.trap_active = 0U;
     local.trap_reserved = 0U;
-
+    local.current_task = nullptr;
+    local.scheduler = nullptr;
+    local.scheduler_extra = nullptr;
+    local.delay_list = nullptr;
+    local.idle_task = nullptr;
+    local.timeslice_ticks = 0U;
 
     const uintptr_t stack_base =
         reinterpret_cast<uintptr_t>(__hart_stacks_start)
@@ -138,12 +143,9 @@ HartLocal& current()
     return *reinterpret_cast<HartLocal*>(value);
 }
 
-
-const HartLocal* table()
-{
+HartLocal* table() {
     return g_harts;
 }
-
 
 bool all_online(HartIndex expected_count)
 {

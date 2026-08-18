@@ -14,6 +14,8 @@ This is the canonical execution plan for Jixia's current one-person development 
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
+Current implementation checkpoint: `docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDATION.md`.
+
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
 ## 1. Working model

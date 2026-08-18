@@ -6,6 +6,7 @@
 #include "microkernel/arch/riscv/trap_frame.h"
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
+#include "microkernel/core/task_syscall.h"
 #include "microkernel/core/timer.h"
 
 extern "C" int jixia_trap_frame_test_is_active();
@@ -195,6 +196,10 @@ bool try_handle_supervisor_ecall(TrapFrame& frame) {
 
 void dispatch(TrapFrame& frame)
 {
+    if (task::syscall::try_handle(frame)) {
+        return;
+    }
+
     if (try_handle_machine_timer_interrupt(frame))
     {
         return;
