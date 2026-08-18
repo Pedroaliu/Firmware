@@ -21,7 +21,7 @@ void RunQueue::reset() {
 bool RunQueue::insert(task::Task& task) {
     SpinlockGuard guard(lock_);
 
-    if (task.queued) {
+    if (task.queued || task.delay.queued || task.state == task::TaskState::ended) {
         return false;
     }
 
@@ -59,6 +59,10 @@ task::Task* RunQueue::remove() {
     selected->next = nullptr;
     selected->queued = false;
     --size_;
+
+    if (selected->state != task::TaskState::ready || selected->delay.queued) {
+        hart::park();
+    }
     return selected;
 }
 
@@ -90,7 +94,8 @@ void Scheduler::bind_hart(hart::HartLocal& local) {
 }
 
 bool Scheduler::add_task(task::Task& task) {
-    if (task.state == task::TaskState::ended || task.idle || task.cpu == nullptr) {
+    if (task.state == task::TaskState::ended || task.idle || task.cpu == nullptr ||
+        task.delay.queued) {
         return false;
     }
 
@@ -126,7 +131,7 @@ task::Task& Scheduler::set_next_runnable() {
 
     if (selected == nullptr) {
         selected = local.idle_task;
-        local.timeslice_ticks = time::TimeManager::instance().idle_timeslice_ticks();
+        local.timeslice_ticks = time::TimeManager::instance().idle_timeslice_ticks(local);
     } else {
         local.timeslice_ticks = time::TimeManager::instance().task_timeslice_ticks();
     }

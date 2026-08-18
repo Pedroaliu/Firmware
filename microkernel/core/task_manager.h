@@ -25,7 +25,7 @@ class TaskManager final {
 
     static TaskManager& instance();
 
-    void initialize();
+    [[nodiscard]] bool initialize();
 
     [[nodiscard]] Task* create_idle_task(hart::HartLocal& owner);
     [[nodiscard]] Task* create_task(EntryPoint entry, uintptr_t argument,

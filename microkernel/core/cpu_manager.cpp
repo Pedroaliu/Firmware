@@ -27,7 +27,9 @@ bool CpuManager::initialize(hart::HartIndex present_count) {
     for (hart::HartIndex index = 0U; index < present_count; ++index) {
         hart::HartLocal& local = harts[index];
         scheduler.bind_hart(local);
-        time.initialize_hart(local);
+        if (!time.initialize_hart(local)) {
+            return false;
+        }
 
         task::Task* idle = tasks.create_idle_task(local);
         if (idle == nullptr) {

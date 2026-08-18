@@ -34,6 +34,13 @@ enum class ExitStatus : int32_t {
 
 struct Task;
 
+struct DelayNode {
+    Task* previous;
+    Task* next;
+    uint64_t deadline;
+    bool queued;
+};
+
 struct WaitInfo {
     bool active;
     int64_t tid;
@@ -67,6 +74,9 @@ struct Task {
     TaskState state;
     void* state_info;
     TaskTracker* tracker;
+
+    /* Per-hart TimeManager queue state, mirroring Hostboot's delay_node. */
+    DelayNode delay;
 
     uintptr_t stack_bottom;
     uintptr_t stack_top;

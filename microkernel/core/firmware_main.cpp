@@ -256,7 +256,7 @@ void boot_main(
      * identity before remaining mainstore is handed to PageManager.
      */
     jixia_m00_07_04_run_mainstore_transition_probe();
-#elif defined(JIXIA_M00_08_01_PROBE)
+#elif defined(JIXIA_M00_08_01_PROBE) || defined(JIXIA_M00_08_02_PROBE)
     /*
      * Build the first Hostboot-shaped executive and dispatch a real U task.
      * This path does not call the task as an M-mode C++ function.
@@ -287,7 +287,7 @@ void secondary_main(
     /* Preserve the established per-hart timer proof before runtime release. */
     smp_timer_test::run_secondary();
 
-#ifdef JIXIA_M00_08_01_PROBE
+#if defined(JIXIA_M00_08_01_PROBE) || defined(JIXIA_M00_08_02_PROBE)
     /*
      * The boot hart publishes this gate only after it has created every
      * per-hart scheduler/idle-task object. Waiting before Kernel::instance()

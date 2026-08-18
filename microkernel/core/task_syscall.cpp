@@ -9,6 +9,7 @@
 #include "microkernel/core/hart.h"
 #include "microkernel/core/scheduler.h"
 #include "microkernel/core/task_manager.h"
+#include "microkernel/core/time_manager.h"
 #include "microkernel/core/vmm_manager.h"
 
 namespace jixia::microkernel::task::syscall {
@@ -16,6 +17,7 @@ namespace {
 
 constexpr uintptr_t kMstatusMppMask = uintptr_t{3U} << 11U;
 constexpr intptr_t kErrorNoMemory = -12;
+constexpr intptr_t kErrorInvalidArgument = -22;
 constexpr intptr_t kErrorDeadlock = -35;
 constexpr intptr_t kErrorNotSupported = -95;
 
@@ -26,6 +28,11 @@ bool g_wait_reported = false;
 bool g_wait_block_reported = false;
 bool g_detach_reported = false;
 bool g_idle_reported = false;
+
+#ifdef JIXIA_M00_08_02_PROBE
+bool g_sleep_reported = false;
+bool g_sleep_resume_reported = false;
+#endif
 
 [[nodiscard]] uintptr_t error_value(intptr_t error) {
     return static_cast<uintptr_t>(error);
@@ -49,6 +56,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
     caller->context.mepc += 4U;
 
     const uintptr_t number = caller->context.x[17];
+    bool rescheduled = false;
     switch (number) {
     case JIXIA_TASK_SYSCALL_YIELD: {
         const TaskId caller_tid = caller->tid;
@@ -64,6 +72,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
                    "M00_08_CONTEXT_SWITCH: PASS\n");
             g_context_switch_reported = true;
         }
+        rescheduled = true;
         break;
     }
 
@@ -107,10 +116,22 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
         }
 
         TaskManager::instance().end_task(*caller, return_value, ExitStatus::exited_clean);
+        rescheduled = true;
 
         if (initial_task && detached && return_value == JIXIA_M00_08_INIT_RESULT) {
             printk("M00_08_TASK_LIFECYCLE: PASS\n");
         }
+
+#ifdef JIXIA_M00_08_02_PROBE
+        if (return_value == JIXIA_M00_08_SLEEP_RESULT && !g_sleep_resume_reported) {
+            printk("M00_08_SLEEP_RESUME: PASS\n");
+            g_sleep_resume_reported = true;
+        }
+
+        if (initial_task && detached && return_value == JIXIA_M00_08_PREEMPT_INIT_RESULT) {
+            printk("M00_08_PREEMPTIVE_SCHEDULER: PASS\n");
+        }
+#endif
         break;
     }
 
@@ -134,6 +155,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             printk("M00_08_TASK_WAIT_BLOCK: PASS\n");
             g_wait_block_reported = true;
         }
+        rescheduled = result == WaitResult::blocked;
         break;
     }
 
@@ -145,11 +167,43 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
         }
         break;
 
+    case JIXIA_TASK_SYSCALL_SLEEP: {
+        const uint64_t seconds = caller->context.x[10];
+        const uint64_t nanoseconds = caller->context.x[11];
+
+        caller->context.x[10] = 0U;
+        if (!time::TimeManager::instance().delay_task(*caller, seconds, nanoseconds)) {
+            caller->context.x[10] = error_value(kErrorInvalidArgument);
+            break;
+        }
+
+        (void)caller->cpu->scheduler->set_next_runnable();
+        rescheduled = true;
+
+#ifdef JIXIA_M00_08_02_PROBE
+        if (!g_sleep_reported) {
+            printk("M00_08_TASK_SLEEP: PASS\n");
+            g_sleep_reported = true;
+        }
+#endif
+        break;
+    }
+
     default:
-        return false;
+        printk("Invalid task syscall: %lu\n", static_cast<unsigned long>(number));
+        TaskManager::instance().end_task(*caller, 0U, ExitStatus::crashed);
+        rescheduled = true;
+        break;
     }
 
     TaskManager::restore_current_context(frame);
+#ifdef JIXIA_M00_08_02_PROBE
+    if (rescheduled) {
+        time::TimeManager::instance().arm_current_timeslice();
+    }
+#else
+    (void)rescheduled;
+#endif
     return true;
 }
 

@@ -42,7 +42,10 @@ These repositories are related but are not interchangeable. Confirm the active o
 
 ### External implementation repositories
 
-- `open-power/hostboot`, reference branch `release-fw1120` — major source for Hostboot architecture, isteps, targeting, RAS, chip operations, and distributed firmware cooperation.
+- `open-power/hostboot`, reference branch `release-fw1120`, pinned scheduler-study commit
+  `22e3c409ab8b439d4c8eb31b644acb498032a487` — major source for Hostboot architecture,
+  executive/task scheduling, isteps, targeting, RAS, chip operations, and distributed firmware
+  cooperation.
 
 Additional external repositories to pin when implementation reaches them:
 

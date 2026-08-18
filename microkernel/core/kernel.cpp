@@ -11,6 +11,7 @@
 #include "microkernel/memory/page_manager.h"
 
 extern "C" char jixia_user_init_task[];
+extern "C" char jixia_user_preemption_init_task[];
 extern "C" void jixia_release_executive_harts();
 extern "C" [[noreturn]] void jixia_task_enter_first(jixia::arch::riscv::TrapFrame* frame,
                                                     uintptr_t satp);
@@ -55,7 +56,9 @@ bool Kernel::memory_bootstrap() {
 bool Kernel::cpu_bootstrap(hart::HartIndex present_count) {
     time::TimeManager::instance().initialize();
     scheduler::Scheduler::instance().initialize();
-    task::TaskManager::instance().initialize();
+    if (!task::TaskManager::instance().initialize()) {
+        return false;
+    }
     return cpu::CpuManager::instance().initialize(present_count);
 }
 
@@ -71,8 +74,15 @@ bool Kernel::init_task_bootstrap() {
     hart::HartLocal& boot = cpu::CpuManager::instance().boot_hart();
     const auto& address_space = memory::VmmManager::instance().boot_address_space();
 
+#ifdef JIXIA_M00_08_02_PROBE
+    const task::EntryPoint entry =
+        reinterpret_cast<task::EntryPoint>(jixia_user_preemption_init_task);
+#else
+    const task::EntryPoint entry = reinterpret_cast<task::EntryPoint>(jixia_user_init_task);
+#endif
+
     task::Task* initial = task::TaskManager::instance().create_task(
-        reinterpret_cast<task::EntryPoint>(jixia_user_init_task), 0U, address_space, boot, true);
+        entry, 0U, address_space, boot, true);
     if (initial == nullptr) {
         return false;
     }
@@ -95,6 +105,10 @@ void Kernel::deferred_bootstrap() {
     alignas(TRAP_FRAME_ALIGNMENT) jixia::arch::riscv::TrapFrame frame = {};
     task::TaskManager::restore_current_context(frame);
     memory::VmmManager::instance().prepare_first_user_dispatch();
+
+#ifdef JIXIA_M00_08_02_PROBE
+    time::TimeManager::instance().arm_current_timeslice();
+#endif
 
     if (hart::current().role == hart::HartRole::boot) {
         printk("M00_08_TASK_DISPATCH: PASS\n");
@@ -132,18 +146,30 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
+#ifdef JIXIA_M00_08_02_PROBE
+    const char* executive_header = "[Jixia][M00-08.02][HostbootSchedulerAlignment]";
+    const char* scheduler_mode = "global FIFO + per-hart affinity queue + mtime preemption";
+    const char* time_mode = "per-hart sleep queue + deadline-aware idle slice";
+#else
+    const char* executive_header = "[Jixia][M00-08.01][HostbootTaskFoundation]";
+    const char* scheduler_mode = "global FIFO + per-hart affinity queue (cooperative probe)";
+    const char* time_mode = "per-hart queues initialized; timer scheduling deferred";
+#endif
+
     printk("\n"
-           "[Jixia][M00-08.01][HostbootTaskFoundation]\n"
+           "%s\n"
            "cpp         : ready\n"
            "boot data   : QEMU handoff phase (dummy)\n"
            "page manager: contained bootstrap pool\n"
            "heap manager: fixed task storage (dynamic heap deferred)\n"
            "vmm         : shared bootstrap Sv39 root\n"
-           "scheduler   : global FIFO + per-hart affinity queue\n"
+           "scheduler   : %s\n"
+           "time        : %s\n"
            "task model  : tracker/wait/detach/idle\n"
            "platform    : status publication phase (dummy)\n"
            "debug       : pointer registry phase (dummy)\n"
-           "M00_08_HOSTBOOT_BOOTSTRAP: PASS\n");
+           "M00_08_HOSTBOOT_BOOTSTRAP: PASS\n",
+           executive_header, scheduler_mode, time_mode);
 
     /* Hostboot releases other hardware threads immediately before dispatch. */
     jixia_release_executive_harts();

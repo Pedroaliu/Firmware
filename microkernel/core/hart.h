@@ -108,6 +108,7 @@ struct alignas(64) HartLocal
     void* delay_list;
     task::Task* idle_task;
     uintptr_t timeslice_ticks;
+    uintptr_t scheduler_preemption_count;
 };
 
 
@@ -163,6 +164,8 @@ static_assert(offsetof(HartLocal, scheduler_extra) == HART_LOCAL_SCHEDULER_EXTRA
 static_assert(offsetof(HartLocal, delay_list) == HART_LOCAL_DELAY_LIST_OFFSET);
 static_assert(offsetof(HartLocal, idle_task) == HART_LOCAL_IDLE_TASK_OFFSET);
 static_assert(offsetof(HartLocal, timeslice_ticks) == HART_LOCAL_TIMESLICE_TICKS_OFFSET);
+static_assert(offsetof(HartLocal, scheduler_preemption_count) ==
+              HART_LOCAL_PREEMPTION_COUNT_OFFSET);
 static_assert(sizeof(HartLocal) == HART_LOCAL_SIZE);
 static_assert(alignof(HartLocal) == 64U);
 

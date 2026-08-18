@@ -89,6 +89,7 @@ HartLocal& initialize(
     local.delay_list = nullptr;
     local.idle_task = nullptr;
     local.timeslice_ticks = 0U;
+    local.scheduler_preemption_count = 0U;
 
     const uintptr_t stack_base =
         reinterpret_cast<uintptr_t>(__hart_stacks_start)

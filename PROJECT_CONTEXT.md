@@ -8,8 +8,8 @@
 - **Project/platform:** 稷下 / **Jixia**
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation`
-- **Current implementation milestone:** `M00-08 Boot Service Execution Foundation`
+- **Latest completed milestone:** `M00-08.01 Hostboot-shaped Task Executive`
+- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment`
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
@@ -355,21 +355,40 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 
 ## 11. Current implementation — M00-08
 
-M00-08 Boot Service Execution Foundation is ACTIVE.
+M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
+at `e930a24`; M00-08.02 is the current increment.
 
-Planned increments:
+Actual increment ledger:
 
 ```text
-08.01  TaskContext + M bare -> U task -> ECALL -> M
-08.02  minimal scheduler/task state/idle
-08.03  minimum task syscalls
-08.04  message queue + blocking/wakeup IPC
-08.05  resident Root Component Registry
-08.06  init_main -> registry -> InitService
-08.07  minimal Base InitService lifecycle
+08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
+               + ready queues + idle + create/yield/end/wait/detach
+08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
+08.03  NEXT    message queue + blocking/wakeup IPC
+08.04  NEXT    safe user-copy/translation syscall boundary
+08.05  NEXT    resident Root Component Registry
+08.06  NEXT    init_main -> registry -> InitService
+08.07  NEXT    minimal Base InitService lifecycle
 ```
 
-Immediate work begins with M00-08.01 by reviewing M00-06 privilege-transition code, M00-07 Sv39 primitives, and the accepted TrapFrame. Reusable mechanisms should be promoted into a real `TaskContext`/dispatch ABI instead of extending the synthetic S-mode probes.
+The current M00-08.02 work translates Hostboot's decrementer and delay-list policy to RISC-V
+`mtime`: save the interrupted U task, release expired sleepers, select local/global/idle work,
+restore the selected task, and arm the next task or sleep deadline.
+
+Current service boundary:
+
+```text
+supported now:
+    statically resident U-mode task entry
+    explicit bootstrap AddressSpace
+    create/preempt/block/wake/wait/end lifecycle
+
+not yet a real usr service:
+    no named component registry/task_exec
+    no message IPC
+    no safe user-copy
+    no protected per-service VSpace
+```
 
 ## 12. Next provider-backed component milestone
 
