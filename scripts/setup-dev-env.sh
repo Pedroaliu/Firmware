@@ -58,6 +58,10 @@ Required tools:
 
 Debugger:
   gdb-multiarch (or riscv64-unknown-elf-gdb if already installed)
+
+APT safeguards:
+  JIXIA_APT_UPDATE_TIMEOUT_SECONDS  Overall apt-get update limit (default: 300)
+  JIXIA_APT_INSTALL_TIMEOUT_SECONDS Overall apt-get install limit (default: 900)
 EOF
 }
 
@@ -220,6 +224,11 @@ print_detected_versions()
     fi
 }
 
+positive_integer()
+{
+    [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
 install_apt_packages()
 {
     have apt-get || die "APT is not available"
@@ -254,8 +263,31 @@ install_apt_packages()
         sudo_cmd=(sudo)
     fi
 
-    "${sudo_cmd[@]}" apt-get update
-    "${sudo_cmd[@]}" apt-get install -y "${MISSING_PACKAGES[@]}"
+    local update_timeout="${JIXIA_APT_UPDATE_TIMEOUT_SECONDS:-300}"
+    local install_timeout="${JIXIA_APT_INSTALL_TIMEOUT_SECONDS:-900}"
+    if ! positive_integer "${update_timeout}"; then
+        die "JIXIA_APT_UPDATE_TIMEOUT_SECONDS must be a positive integer"
+    fi
+    if ! positive_integer "${install_timeout}"; then
+        die "JIXIA_APT_INSTALL_TIMEOUT_SECONDS must be a positive integer"
+    fi
+
+    local -a apt_options=(
+        -o Acquire::Retries=3
+        -o Acquire::http::Timeout=20
+        -o Acquire::https::Timeout=20
+        -o Acquire::ForceIPv4=true
+        -o Dpkg::Use-Pty=0
+    )
+
+    info "running apt-get update (overall timeout: ${update_timeout}s)"
+    "${sudo_cmd[@]}" timeout --signal=TERM --kill-after=10s "${update_timeout}s" \
+        apt-get "${apt_options[@]}" update
+
+    info "installing packages (overall timeout: ${install_timeout}s)"
+    "${sudo_cmd[@]}" timeout --signal=TERM --kill-after=10s "${install_timeout}s" \
+        apt-get "${apt_options[@]}" install -y --no-install-recommends \
+        "${MISSING_PACKAGES[@]}"
 }
 
 main()
