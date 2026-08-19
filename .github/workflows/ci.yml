@@ -15,42 +15,121 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: jixia-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  rv64-qemu-regression:
-    name: RV64 QEMU regression
+  scope:
+    name: Patch scope and hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    outputs:
+      format_base: ${{ steps.scope.outputs.format_base }}
+      full_ci: ${{ steps.scope.outputs.full_ci }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine validation scope
+        id: scope
+        shell: bash
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            format_base="${PR_BASE_SHA}"
+            scope_base="${PR_BASE_SHA}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            format_base="$(git rev-parse HEAD^)"
+            scope_base="${EVENT_BEFORE}"
+          else
+            git fetch origin main:refs/remotes/origin/main
+            format_base="$(git merge-base HEAD origin/main)"
+            scope_base="${EVENT_BEFORE}"
+          fi
+
+          if [[ -z "${scope_base}" || "${scope_base}" =~ ^0+$ ]]; then
+            scope_base="${format_base}"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only "${scope_base}" HEAD
+          )
+
+          full_ci=true
+          if [[ "${EVENT_NAME}" != "workflow_dispatch" &&
+                ${#changed_files[@]} -gt 0 ]]; then
+            full_ci=false
+            for path in "${changed_files[@]}"; do
+              if [[ "${path}" != docs/research/*.md ]]; then
+                full_ci=true
+                break
+              fi
+            done
+          fi
+
+          echo "scope base: ${scope_base}"
+          echo "format base: ${format_base}"
+          printf 'changed: %s\n' "${changed_files[@]}"
+          echo "full CI: ${full_ci}"
+
+          echo "format_base=${format_base}" >> "${GITHUB_OUTPUT}"
+          echo "full_ci=${full_ci}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check patch hygiene
+        shell: bash
+        env:
+          FORMAT_BASE: ${{ steps.scope.outputs.format_base }}
+        run: |
+          set -euo pipefail
+          git diff --check "${FORMAT_BASE}" HEAD
+
+  full-regression:
+    name: RV64 QEMU full regression
+    needs: scope
+    if: ${{ needs.scope.outputs.full_ci == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
+    container:
+      image: ghcr.io/pedroaliu/jixia-ci@sha256:2bfeddaeaa8d44afd60c6e6efce976dd3e32d10cc11eb3b4113d92f364a2ab5c
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    defaults:
+      run:
+        shell: bash
+
     env:
-      DEBIAN_FRONTEND: noninteractive
       JIXIA_QEMU_TIMEOUT_SECONDS: 5
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Prepare development environment
+      - name: Verify development environment
         run: |
-          bash scripts/setup-dev-env.sh --yes --without-gdb
+          bash scripts/setup-dev-env.sh --check --without-gdb
 
-      - name: Check patch hygiene and C/C++ formatting
-        shell: bash
+      - name: Check C/C++ formatting
+        env:
+          FORMAT_BASE: ${{ needs.scope.outputs.format_base }}
         run: |
-          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
-            FORMAT_BASE="$(git rev-parse HEAD^)"
-          else
-            git fetch origin main:refs/remotes/origin/main
-            FORMAT_BASE="$(git merge-base HEAD origin/main)"
-          fi
           echo "format base: ${FORMAT_BASE}"
-          git diff --check "${FORMAT_BASE}" HEAD
           bash scripts/check-format.sh --base "${FORMAT_BASE}"
 
       - name: Show resolved toolchain
@@ -142,3 +221,41 @@ jobs:
             build/m00-07-04/
             build/m00-08-01/
             build/m00-08-02/
+
+  required:
+    name: RV64 QEMU regression
+    needs:
+      - scope
+      - full-regression
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify required validation
+        shell: bash
+        env:
+          FULL_CI: ${{ needs.scope.outputs.full_ci }}
+          FULL_RESULT: ${{ needs.full-regression.result }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${SCOPE_RESULT}" != "success" ]]; then
+            echo "patch scope or hygiene failed: ${SCOPE_RESULT}" >&2
+            exit 1
+          fi
+
+          if [[ "${FULL_CI}" == "true" &&
+                "${FULL_RESULT}" != "success" ]]; then
+            echo "full regression failed: ${FULL_RESULT}" >&2
+            exit 1
+          fi
+
+          if [[ "${FULL_CI}" == "false" &&
+                "${FULL_RESULT}" != "skipped" ]]; then
+            echo "research-only fast path expected a skipped full regression" >&2
+            exit 1
+          fi
+
+          echo "required validation passed"
