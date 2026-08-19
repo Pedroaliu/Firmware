@@ -9,7 +9,7 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.01 Hostboot-shaped Task Executive`
-- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment`
+- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment` — code complete, local acceptance PASS; NOT DONE until CI evidence is recorded
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
@@ -356,7 +356,8 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 ## 11. Current implementation — M00-08
 
 M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
-at `e930a24`; M00-08.02 is the current increment.
+at `e930a24`; M00-08.02 is code-complete with deterministic local acceptance evidence and stays
+ACTIVE until the CI run ID is recorded at integration.
 
 Actual increment ledger:
 
@@ -364,6 +365,7 @@ Actual increment ledger:
 08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
                + ready queues + idle + create/yield/end/wait/detach
 08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
+                (local acceptance x3 PASS; CI/integration evidence pending)
 08.03  NEXT    message queue + blocking/wakeup IPC
 08.04  NEXT    safe user-copy/translation syscall boundary
 08.05  NEXT    resident Root Component Registry
@@ -371,9 +373,10 @@ Actual increment ledger:
 08.07  NEXT    minimal Base InitService lifecycle
 ```
 
-The current M00-08.02 work translates Hostboot's decrementer and delay-list policy to RISC-V
-`mtime`: save the interrupted U task, release expired sleepers, select local/global/idle work,
-restore the selected task, and arm the next task or sleep deadline.
+M00-08.02 translated Hostboot's decrementer and delay-list policy to RISC-V `mtime`: save the
+interrupted U task, release expired sleepers, select local/global/idle work, restore the selected
+task, and arm the next task or sleep deadline. Timer arming is executive mechanism in all M00-08
+builds; only the acceptance workload and markers carry the M00-08.02 probe gate.
 
 Current service boundary:
 

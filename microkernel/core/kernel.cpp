@@ -106,9 +106,12 @@ void Kernel::deferred_bootstrap() {
     task::TaskManager::restore_current_context(frame);
     memory::VmmManager::instance().prepare_first_user_dispatch();
 
-#ifdef JIXIA_M00_08_02_PROBE
+    /*
+     * Timer arming is executive mechanism, not probe workload: every M00-08
+     * build arms the first absolute deadline before entering U mode. Probes
+     * only select the acceptance workload and markers.
+     */
     time::TimeManager::instance().arm_current_timeslice();
-#endif
 
     if (hart::current().role == hart::HartRole::boot) {
         printk("M00_08_TASK_DISPATCH: PASS\n");
@@ -148,13 +151,16 @@ void Kernel::deferred_bootstrap() {
 
 #ifdef JIXIA_M00_08_02_PROBE
     const char* executive_header = "[Jixia][M00-08.02][HostbootSchedulerAlignment]";
-    const char* scheduler_mode = "global FIFO + per-hart affinity queue + mtime preemption";
-    const char* time_mode = "per-hart sleep queue + deadline-aware idle slice";
 #else
     const char* executive_header = "[Jixia][M00-08.01][HostbootTaskFoundation]";
-    const char* scheduler_mode = "global FIFO + per-hart affinity queue (cooperative probe)";
-    const char* time_mode = "per-hart queues initialized; timer scheduling deferred";
 #endif
+    /*
+     * mtime preemption and deadline-aware idle are unconditional executive
+     * mechanism in every M00-08 build; the probe only selects the acceptance
+     * workload and markers. Both diagnostics describe the same scheduler.
+     */
+    const char* scheduler_mode = "global FIFO + per-hart affinity queue + mtime preemption";
+    const char* time_mode = "per-hart sleep queue + deadline-aware idle slice";
 
     printk("\n"
            "%s\n"

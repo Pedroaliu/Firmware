@@ -35,6 +35,13 @@ bool RunQueue::insert(task::Task& task) {
     }
 
     tail_ = &task;
+    /*
+     * Publish READY inside the same critical section that marks the task
+     * queued. Consumers must hold this lock to dequeue, so a task can never
+     * be observed in a run queue while its state is not READY, and a failed
+     * insertion returns without touching the task (previous state kept).
+     */
+    task.state = task::TaskState::ready;
     task.queued = true;
     ++size_;
     return true;
@@ -94,12 +101,15 @@ void Scheduler::bind_hart(hart::HartLocal& local) {
 }
 
 bool Scheduler::add_task(task::Task& task) {
+    /*
+     * Every RunQueue::insert failure condition is checked before the READY
+     * transition. Insert can then only fail on a concurrent-insert race, and
+     * in that case it returns without mutating the task (fail-closed).
+     */
     if (task.state == task::TaskState::ended || task.idle || task.cpu == nullptr ||
-        task.delay.queued) {
+        task.delay.queued || task.queued) {
         return false;
     }
-
-    task.state = task::TaskState::ready;
 
     if (task.affinity_pinned != 0U) {
         auto* queue = static_cast<RunQueue*>(task.cpu->scheduler_extra);

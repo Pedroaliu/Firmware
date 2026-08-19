@@ -52,9 +52,7 @@ void bind_hart_local(
         : "memory");
 }
 
-
 } // namespace
-
 
 namespace jixia::microkernel::hart {
 

@@ -1,6 +1,6 @@
 # Jixia M00-08.02 Hostboot Scheduler Alignment
 
-**Status:** implementation candidate; host syntax/preprocessor checks pass; RV64/QEMU CI pending
+**Status:** implemented with local acceptance evidence (2026-08-19): deterministic single-hart RV64/QEMU acceptance PASS ×3 with quantitative preemption and deadline evidence; full local M00-02..M00-08.02 regression chain PASS. NOT formally DONE until the GitHub Actions run ID is recorded at integration.
 
 **Date:** 2026-08-18
 
@@ -111,6 +111,12 @@ context's `mstatus.MPIE`.
 
 Every real timer-driven switch increments `HartLocal.scheduler_preemption_count`.
 
+Timer arming is executive mechanism, not probe workload: first dispatch, every rescheduling ECALL
+exit, and every timer-driven dispatch re-arm the absolute `mtimecmp` deadline in all M00-08 builds.
+Only the acceptance workload and its markers remain behind the M00-08.02 probe gate, matching the
+M00-08.01 convention (mechanism unconditional, workload gated). M00-08.01 acceptance therefore
+already runs with machine-timer preemption armed.
+
 ## 5. Sleep and idle deadline policy
 
 Each present hart owns a sorted, spinlock-protected delay queue. A sleeping task carries an
@@ -139,6 +145,15 @@ nearest sleeping-task deadline
 
 The final `mtimecmp` value is programmed as an absolute deadline. A tight idle-yield loop must not
 recompute `now + old_remaining` and gradually move a sleeper's deadline forward.
+
+Acceptance proves this quantitatively: the workload prints its requested and measured tick counts,
+and the kernel publishes its own arming constants (`M00_08_SCHED_SLICES`). The runner asserts
+`elapsed >= requested` and `elapsed < task_timeslice_ticks`, deriving the bound from the printed
+constants rather than a magic number. Both polling regressions fail deterministically, because the
+timer is re-armed at the scheduling point: a fixed task-slice timer wakes the sleeper roughly one
+task slice (100 000 ticks) after sleep entry, and a fixed idle-slice timer roughly one idle slice
+(1 000 000 ticks). Deadline-aware arming wakes it just above the 20 000-tick request, about five
+times below the bound.
 
 The QEMU-virt backend currently records a 10 MHz timebase constant. Reading the platform
 `timebase-frequency` property from the boot handoff is still required before this becomes a generic
@@ -195,6 +210,20 @@ Runner:
 ```bash
 bash scripts/test-m00-08-02-preemptive-scheduler.sh
 ```
+
+Required quantitative evidence, asserted by the runner rather than only printed:
+
+```text
+M00_08_PREEMPTION_COUNT: >= 1
+M00_08_SCHED_SLICES: arming constants (bound source)
+M00_08_SLEEP_WAKE_EVIDENCE: elapsed >= requested && elapsed < task_timeslice_ticks
+```
+
+Observed locally on 2026-08-19 across three deterministic runs: elapsed 20129/20106/20160 of
+20000 requested ticks (task slice 100000), preemption count 1. The pre-release stack pre-mapping
+invariant (section 6) is proven constructively — the fixed-pool mapping loop precedes the executive
+release gate in the same static boot sequence — so no runtime page-table instrumentation is added
+for it.
 
 The runner deliberately uses `-smp 1` so the handshake is a deterministic preemption proof rather
 than a second hart running the witness concurrently. The CI workflow now runs both M00-08.01 and

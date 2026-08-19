@@ -2,15 +2,15 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-18
+- **Last updated:** 2026-08-19
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.01 Hostboot-shaped Task Executive` — DONE
 - **M00-08.01 integration:** `e930a24ebcfc5be969feedca5733f5e906eee656`
-- **M00-08.01 acceptance:** GNU RV64 build/link and single-hart QEMU task lifecycle PASS
+- **M00-08.02 status:** code complete; local acceptance PASS (deterministic ×3, quantitative preemption/deadline evidence); full local M00-02..M00-08.02 chain PASS — NOT DONE until the CI run ID is recorded and the increment is integrated
 - **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
 - **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
-- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment` — ACTIVE
-- **Immediate next step:** close RV64/QEMU evidence for mtime preemption, sleep/wakeup, and idle deadlines
+- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment` — ACTIVE (closure evidence collection; CI pending)
+- **Immediate next step:** push `agent/m00-08-02-close`, record the GitHub Actions run ID, integrate to `main`, flip M00-08.02 to DONE, then activate `M00-08.03 Message IPC Foundation`
 - **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
@@ -39,7 +39,7 @@
 | M00-07 Pre-DDR Memory Foundation | DONE | CI `32005255564`; `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md` | FFS pflash, contained EarlyMemory, Sv39, PNOR paging, mainstore mechanism prototype |
 | Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
 | M00-08.01 Hostboot-shaped Task Executive | DONE | `e930a24`; `scripts/test-m00-08-01-task-lifecycle.sh` | U task dispatch, task/tracker lifecycle, ready queues, idle, create/yield/end/wait/detach |
-| M00-08.02 Hostboot Scheduler Alignment | ACTIVE | `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md` | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping |
+| M00-08.02 Hostboot Scheduler Alignment | ACTIVE | local `scripts/test-m00-08-02-preemptive-scheduler.sh` ×3 PASS; CI run ID pending | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping; DONE deferred until recorded CI evidence |
 | M00-08.03 Message IPC Foundation | NEXT | Hostboot syscall/message path | blocking/wakeup IPC required before real service registry |
 | Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
 | Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
@@ -345,6 +345,25 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-19 — M00-08.02 closure implemented; CI/integration evidence pending
+
+- Un-gated timer arming from the M00-08.02 probe: first dispatch, every rescheduling ECALL exit,
+  and every timer-driven dispatch re-arm the absolute `mtimecmp` deadline in all M00-08 builds;
+  only the acceptance workload and markers stay probe-gated (M00-08.01 convention).
+- Strengthened M00-08.02 acceptance with quantitative assertions: `scheduler_preemption_count >= 1`
+  and sleeper wake elapsed at/above the request and below one task timeslice, with the bound
+  derived from the kernel-published `M00_08_SCHED_SLICES` constants rather than a magic number
+  (observed: 20129/20106/20160 of 20000 ticks against a 100000 task slice, count 1). This fails
+  both fixed task-slice polling (~100000) and fixed idle-slice polling (~1000000). Stack
+  pre-mapping stays a constructive invariant (mapping loop precedes hart release); no runtime
+  page-table instrumentation was added for it.
+- Hardened `Scheduler::add_task` to publish READY only after queue insertion succeeds.
+- Full local regression chain PASS: M00-02..M00-05, M00-06-02..04, M00-07-01..04, M00-08.01 x2
+  (now preemptible, markers unchanged), M00-08.02 x3, default no-probe RV64 build, clang-format.
+- Remaining for closure: push `agent/m00-08-02-close`, record the GitHub Actions run ID,
+  integrate to `main`. M00-08.02 stays ACTIVE — it is not flipped to DONE in this ledger until
+  the CI evidence is recorded. M00-08.03 activates only after that.
 
 ### 2026-08-18 — M00-08.01 accepted; M00-08.02 scheduler alignment activated
 

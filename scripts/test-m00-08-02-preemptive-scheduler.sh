@@ -124,4 +124,57 @@ do
     fi
 done
 
+# Quantitative preemption evidence: the per-hart counter must have advanced.
+readonly preemption_evidence="$(
+    grep -E '^M00_08_PREEMPTION_COUNT: [0-9]+$' "${LOG_FILE}" | head -n 1 || true
+)"
+if [[ -z "${preemption_evidence}" ]]; then
+    echo "M00-08.02: preemption count evidence missing" >&2
+    exit 1
+fi
+readonly preemption_count="${preemption_evidence##*: }"
+if (( preemption_count < 1 )); then
+    echo "M00-08.02: scheduler_preemption_count did not advance (${preemption_count})" >&2
+    exit 1
+fi
+
+# Deadline-aware idle evidence: the sleeper must wake near its own deadline
+# (20000 ticks), strictly below one task timeslice. Both polling regressions
+# fail this bound deterministically because the timer is re-armed at the
+# scheduling point: a fixed task-slice timer wakes the sleeper at roughly
+# task_slice (100000) ticks after sleep entry, a fixed idle-slice timer at
+# roughly idle_slice (1000000). The bound is derived from the kernel's own
+# arming constants, published as M00_08_SCHED_SLICES (no magic constant here).
+readonly slice_evidence="$(
+    grep -E '^M00_08_SCHED_SLICES: task=[0-9]+ idle=[0-9]+$' "${LOG_FILE}" | head -n 1 || true
+)"
+if [[ -z "${slice_evidence}" ]]; then
+    echo "M00-08.02: scheduler slice constants evidence missing" >&2
+    exit 1
+fi
+readonly task_timeslice_ticks="$(printf '%s' "${slice_evidence}" | sed -E 's/.*task=([0-9]+).*/\1/')"
+readonly idle_timeslice_ticks="$(printf '%s' "${slice_evidence}" | sed -E 's/.*idle=([0-9]+)$/\1/')"
+if (( task_timeslice_ticks == 0 || idle_timeslice_ticks == 0 ||
+      task_timeslice_ticks >= idle_timeslice_ticks )); then
+    echo "M00-08.02: invalid slice constants (task=${task_timeslice_ticks} idle=${idle_timeslice_ticks})" >&2
+    exit 1
+fi
+readonly sleep_evidence="$(
+    grep -E '^M00_08_SLEEP_WAKE_EVIDENCE: elapsed=[0-9]+ requested=[0-9]+$' "${LOG_FILE}" |
+        head -n 1 || true
+)"
+if [[ -z "${sleep_evidence}" ]]; then
+    echo "M00-08.02: sleep wake timing evidence missing" >&2
+    exit 1
+fi
+readonly sleep_elapsed="$(printf '%s' "${sleep_evidence}" | sed -E 's/.*elapsed=([0-9]+).*/\1/')"
+readonly sleep_requested="$(printf '%s' "${sleep_evidence}" | sed -E 's/.*requested=([0-9]+)$/\1/')"
+if (( sleep_requested == 0 || sleep_requested >= task_timeslice_ticks ||
+      sleep_elapsed < sleep_requested || sleep_elapsed >= task_timeslice_ticks )); then
+    echo "M00-08.02: sleeper wake outside deadline-aware bounds" \
+        "(elapsed=${sleep_elapsed} requested=${sleep_requested}" \
+        "task_slice=${task_timeslice_ticks})" >&2
+    exit 1
+fi
+
 echo "M00-08.02 Hostboot-shaped preemptive scheduler: PASS"

@@ -4,14 +4,15 @@
 
 This is the canonical execution plan for Jixia's current one-person development mode.
 
-**Last updated:** 2026-08-18
+**Last updated:** 2026-08-19
 
 **Latest completed milestone:** M00-08.01 Hostboot-shaped Task Executive
 
-**Current milestone:** M00-08.02 Hostboot Scheduler Alignment
+**Current milestone:** M00-08.02 Hostboot Scheduler Alignment — code complete, local acceptance
+PASS ×3; NOT DONE until the GitHub Actions run ID is recorded at integration
 
-**Immediate next step:** close RV64/QEMU acceptance for machine-timer preemption, per-hart
-sleep/wakeup queues, deadline-aware idle dispatch, and pre-release task-stack mappings.
+**Immediate next step:** push `agent/m00-08-02-close`, record the GitHub Actions run ID,
+integrate M00-08.02 into `main`, flip it to DONE, then start M00-08.03 design.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
@@ -218,6 +219,15 @@ timer expiry returns the sleeper to READY and resumes after ECALL
 task creation no longer mutates the shared bootstrap root after hart release
 all M00-02 through M00-08.01 regressions remain green
 ```
+
+Satisfied locally on 2026-08-19 by `scripts/test-m00-08-02-preemptive-scheduler.sh` (deterministic,
+three consecutive PASS runs) with quantitative evidence: the preemption counter advanced and the
+sleeper wake elapsed 20129/20106/20160 of 20000 requested ticks, below one task timeslice with the
+bound derived from the kernel-published `M00_08_SCHED_SLICES` constants (so both fixed task-slice
+and fixed idle-slice polling would fail). Pre-release stack pre-mapping holds constructively (the
+fixed-pool mapping loop precedes the hart release gate). Full M00-02..M00-08.02 local chain PASS;
+the milestone is not declared DONE until the GitHub Actions confirmation is recorded at
+integration.
 
 ## 7. NEXT — provider-backed pageable components
 

@@ -18,6 +18,9 @@ constexpr uint64_t kNanosecondsPerSecond = 1000000000ULL;
 
 #ifdef JIXIA_M00_08_02_PROBE
 bool g_sleep_wake_reported = false;
+bool g_sleep_constants_reported = false;
+uint64_t g_sleep_entry_time = 0U;
+uint64_t g_sleep_duration_ticks = 0U;
 #endif
 
 [[noreturn]] void fail_closed() {
@@ -197,6 +200,21 @@ bool TimeManager::delay_task(task::Task& delayed_task, uint64_t seconds, uint64_
         return false;
     }
 
+#ifdef JIXIA_M00_08_02_PROBE
+    if (!g_sleep_constants_reported) {
+        /*
+         * Diagnostic only: publish the timer-arming constants so the runner
+         * derives its acceptance bound from the kernel's own slice values
+         * instead of a magic number. Never affects scheduling behavior.
+         */
+        printk("M00_08_SCHED_SLICES: task=%lu idle=%lu\n",
+               static_cast<unsigned long>(task_timeslice_ticks_),
+               static_cast<unsigned long>(idle_timeslice_ticks_));
+        g_sleep_constants_reported = true;
+    }
+    g_sleep_entry_time = now;
+    g_sleep_duration_ticks = ticks;
+#endif
     return true;
 }
 
@@ -216,6 +234,16 @@ void TimeManager::check_release_tasks(scheduler::Scheduler& scheduler) {
 #ifdef JIXIA_M00_08_02_PROBE
         if (!g_sleep_wake_reported) {
             printk("M00_08_SLEEP_WAKE: PASS\n");
+            /*
+             * Quantitative deadline-aware idle evidence: elapsed must land near
+             * the requested duration, far below the idle-slice cap. The runner
+             * asserts the bound; a fixed idle-slice timer would wake the sleeper
+             * at or beyond that cap instead.
+             */
+            const uint64_t elapsed_ticks = now > g_sleep_entry_time ? now - g_sleep_entry_time : 0U;
+            printk("M00_08_SLEEP_WAKE_EVIDENCE: elapsed=%lu requested=%lu\n",
+                   static_cast<unsigned long>(elapsed_ticks),
+                   static_cast<unsigned long>(g_sleep_duration_ticks));
             g_sleep_wake_reported = true;
         }
 #endif

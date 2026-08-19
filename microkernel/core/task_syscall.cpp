@@ -130,6 +130,8 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 
         if (initial_task && detached && return_value == JIXIA_M00_08_PREEMPT_INIT_RESULT) {
             printk("M00_08_PREEMPTIVE_SCHEDULER: PASS\n");
+            printk("M00_08_PREEMPTION_COUNT: %lu\n",
+                   static_cast<unsigned long>(hart::current().scheduler_preemption_count));
         }
 #endif
         break;
@@ -197,13 +199,9 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
     }
 
     TaskManager::restore_current_context(frame);
-#ifdef JIXIA_M00_08_02_PROBE
     if (rescheduled) {
         time::TimeManager::instance().arm_current_timeslice();
     }
-#else
-    (void)rescheduled;
-#endif
     return true;
 }
 
