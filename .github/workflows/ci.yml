@@ -95,6 +95,14 @@ jobs:
           set -euo pipefail
           git diff --check "${FORMAT_BASE}" HEAD
 
+      - name: Check C/C++ formatting
+        if: ${{ steps.scope.outputs.full_ci == 'true' }}
+        shell: bash
+        env:
+          FORMAT_BASE: ${{ steps.scope.outputs.format_base }}
+        run: |
+          bash scripts/check-format.sh --base "${FORMAT_BASE}"
+
   full-regression:
     name: RV64 QEMU full regression
     needs: scope
@@ -124,13 +132,6 @@ jobs:
       - name: Verify development environment
         run: |
           bash scripts/setup-dev-env.sh --check --without-gdb
-
-      - name: Check C/C++ formatting
-        env:
-          FORMAT_BASE: ${{ needs.scope.outputs.format_base }}
-        run: |
-          echo "format base: ${FORMAT_BASE}"
-          bash scripts/check-format.sh --base "${FORMAT_BASE}"
 
       - name: Show resolved toolchain
         run: |
