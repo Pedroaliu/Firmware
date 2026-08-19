@@ -4,17 +4,21 @@
 
 This is the canonical execution plan for Jixia's current one-person development mode.
 
-**Last updated:** 2026-08-17
+**Last updated:** 2026-08-19
 
-**Latest completed milestone:** M00-07 Pre-DDR Memory Foundation
+**Latest completed milestone:** M00-08.01 Hostboot-shaped Task Executive
 
-**Current milestone:** M00-08 Boot Service Execution Foundation
+**Current milestone:** M00-08.02 Hostboot Scheduler Alignment — code complete, local acceptance
+PASS ×3; NOT DONE until the GitHub Actions run ID is recorded at integration
 
-**Immediate next step:** M00-08.01 — promote the accepted privilege-transition/VMM mechanisms into a real `TaskContext` and M-mode-bare -> U-mode boot-task dispatch path.
+**Immediate next step:** push `agent/m00-08-02-close`, record the GitHub Actions run ID,
+integrate M00-08.02 into `main`, flip it to DONE, then start M00-08.03 design.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
 Current implementation checkpoint: `docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDATION.md`.
+
+Active scheduler checkpoint: `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`.
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
@@ -167,19 +171,23 @@ U-mode
 
 M00-06/M00-07 S-mode contexts remain mechanism tests only.
 
-### M00-08 planned increments
+### M00-08 increment ledger
 
 ```text
-08.01  TaskContext + M-mode bare kernel -> U-mode task -> ECALL -> M
-08.02  minimal task states, ready queue, scheduler, idle path
-08.03  minimum task syscalls: yield, exit, create/wait as required
-08.04  message queue + blocking/wakeup IPC foundation
-08.05  resident Root Component Registry / prebuilt component catalog
-08.06  init_main bootstrap -> registry -> InitService
-08.07  minimal Base InitService task list and lifecycle acceptance
+08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
+               + ready queues + idle + create/yield/end/wait/detach
+08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
+08.03  NEXT    message queue + blocking/wakeup IPC foundation
+08.04  NEXT    safe user-copy/translation syscall boundary
+08.05  NEXT    resident Root Component Registry / prebuilt component catalog
+08.06  NEXT    init_main bootstrap -> registry -> InitService
+08.07  NEXT    minimal Base InitService task list and lifecycle acceptance
 ```
 
-### M00-08.01 acceptance direction
+M00-08.01 absorbed the originally separate minimal scheduler and task-syscall increments so the
+accepted result is a real task lifecycle rather than an M-mode sequential probe.
+
+### M00-08.01 accepted boundary
 
 Prove at least:
 
@@ -196,6 +204,30 @@ return/termination is controlled by task state rather than a probe-specific path
 The first implementation may use a simple/shared service page-table root, but task APIs must not hard-code a global `satp`; later per-service VSpaces must fit without redesigning task context.
 
 M00-08 does not implement a general Linux-style runtime dynamic ELF linker. ELF remains a build-time input; runtime starts preprocessed firmware components through a component catalog.
+
+### M00-08.02 acceptance direction
+
+Prove at least:
+
+```text
+a CPU-bound U task that never yields is preempted by mtime
+a ready witness task executes behind that CPU-bound task
+the interrupted context resumes and exits normally
+a sleeping task becomes BLOCK_SLEEP
+idle uses the nearest wake deadline
+timer expiry returns the sleeper to READY and resumes after ECALL
+task creation no longer mutates the shared bootstrap root after hart release
+all M00-02 through M00-08.01 regressions remain green
+```
+
+Satisfied locally on 2026-08-19 by `scripts/test-m00-08-02-preemptive-scheduler.sh` (deterministic,
+three consecutive PASS runs) with quantitative evidence: the preemption counter advanced and the
+sleeper wake elapsed 20129/20106/20160 of 20000 requested ticks, below one task timeslice with the
+bound derived from the kernel-published `M00_08_SCHED_SLICES` constants (so both fixed task-slice
+and fixed idle-slice polling would fail). Pre-release stack pre-mapping holds constructively (the
+fixed-pool mapping loop precedes the hart release gate). Full M00-02..M00-08.02 local chain PASS;
+the milestone is not declared DONE until the GitHub Actions confirmation is recorded at
+integration.
 
 ## 7. NEXT — provider-backed pageable components
 

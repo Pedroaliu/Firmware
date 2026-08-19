@@ -50,6 +50,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_08_02_PROBE
+    "Boot the M00-08.02 Hostboot-shaped preemptive scheduler probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -234,6 +240,14 @@ if(JIXIA_M00_08_01_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_08_01_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_08_02_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_08_02_PROBE=1
     )
 endif()
 

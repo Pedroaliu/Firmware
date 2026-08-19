@@ -2,13 +2,15 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-17
+- **Last updated:** 2026-08-19
 - **Stable integration branch:** `main`
-- **Latest completed milestone:** `M00-07 Pre-DDR Memory Foundation` — DONE
+- **Latest completed milestone:** `M00-08.01 Hostboot-shaped Task Executive` — DONE
+- **M00-08.01 integration:** `e930a24ebcfc5be969feedca5733f5e906eee656`
+- **M00-08.02 status:** code complete; local acceptance PASS (deterministic ×3, quantitative preemption/deadline evidence); full local M00-02..M00-08.02 chain PASS — NOT DONE until the CI run ID is recorded and the increment is integrated
 - **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
 - **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
-- **Current implementation milestone:** `M00-08 Boot Service Execution Foundation` — ACTIVE
-- **Immediate next step:** M00-08.01 `TaskContext + M-mode bare kernel -> U-mode boot task -> ECALL -> M`
+- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment` — ACTIVE (closure evidence collection; CI pending)
+- **Immediate next step:** push `agent/m00-08-02-close`, record the GitHub Actions run ID, integrate to `main`, flip M00-08.02 to DONE, then activate `M00-08.03 Message IPC Foundation`
 - **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
@@ -36,7 +38,9 @@
 | M00-06 Privilege transition foundation | DONE | CI `31664329150` and later regressions | trusted M trap stack, M->S, S->M->S, hostile lower stack proof |
 | M00-07 Pre-DDR Memory Foundation | DONE | CI `32005255564`; `docs/JIXIA_M00_07_MEMORY_FOUNDATION.md` | FFS pflash, contained EarlyMemory, Sv39, PNOR paging, mainstore mechanism prototype |
 | Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
-| M00-08 Boot Service Execution Foundation | ACTIVE | architecture checkpoint | first real U-mode boot-task substrate |
+| M00-08.01 Hostboot-shaped Task Executive | DONE | `e930a24`; `scripts/test-m00-08-01-task-lifecycle.sh` | U task dispatch, task/tracker lifecycle, ready queues, idle, create/yield/end/wait/detach |
+| M00-08.02 Hostboot Scheduler Alignment | ACTIVE | local `scripts/test-m00-08-02-preemptive-scheduler.sh` ×3 PASS; CI run ID pending | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping; DONE deferred until recorded CI evidence |
+| M00-08.03 Message IPC Foundation | NEXT | Hostboot syscall/message path | blocking/wakeup IPC required before real service registry |
 | Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
 | Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
 | Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering follows prerequisites |
@@ -219,19 +223,23 @@ Primary goal:
 
 > Promote the accepted privilege-transition and VMM mechanisms into a real first-class boot task model.
 
-Planned increments:
+Actual increment ledger:
 
 ```text
-08.01  TaskContext + M-mode bare kernel -> U-mode task -> ECALL -> M
-08.02  minimal task states / scheduler / idle
-08.03  minimum task syscalls
-08.04  message queue + blocking/wakeup IPC
-08.05  resident Root Component Registry
-08.06  init_main -> registry -> InitService
-08.07  minimal Base InitService task-list lifecycle
+08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
+               + ready queues + idle + create/yield/end/wait/detach
+08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
+08.03  NEXT    message queue + blocking/wakeup IPC
+08.04  NEXT    safe user-copy/translation syscall boundary
+08.05  NEXT    resident Root Component Registry
+08.06  NEXT    init_main -> registry -> InitService
+08.07  NEXT    minimal Base InitService task-list lifecycle
 ```
 
-### Immediate M00-08.01 acceptance direction
+M00-08.01 absorbed the originally separate minimal scheduler and task-syscall increments because a
+real create/yield/end/wait lifecycle could not be accepted as an M-mode sequential call chain.
+
+### Accepted M00-08.01 boundary
 
 ```text
 M kernel remains bare/physical
@@ -242,7 +250,24 @@ current task identity and arguments survive the round trip
 termination/return is represented by task state, not probe-specific control flow
 ```
 
-Start by reviewing the existing M00-06 privilege-transition code, M00-07 Sv39 primitives, and TrapFrame. Reuse mechanisms; do not extend the synthetic S-mode probe into the production service model.
+The accepted path is single-hart and cooperative. It runs real statically resident U code, but it
+does not yet launch a named protected firmware service.
+
+### Active M00-08.02 direction
+
+```text
+machine timer interrupt
+    -> save current TaskContext
+    -> release expired sleepers
+    -> requeue interrupted runnable task
+    -> select local/global/idle task
+    -> restore selected TaskContext
+    -> program next task or sleep deadline
+    -> mret
+```
+
+The shared bootstrap root pre-maps every fixed-pool task stack before secondary-hart release. This
+avoids a live shared-page-table mutation before Jixia has a TLB-shootdown protocol.
 
 ---
 
@@ -320,6 +345,39 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-19 — M00-08.02 closure implemented; CI/integration evidence pending
+
+- Un-gated timer arming from the M00-08.02 probe: first dispatch, every rescheduling ECALL exit,
+  and every timer-driven dispatch re-arm the absolute `mtimecmp` deadline in all M00-08 builds;
+  only the acceptance workload and markers stay probe-gated (M00-08.01 convention).
+- Strengthened M00-08.02 acceptance with quantitative assertions: `scheduler_preemption_count >= 1`
+  and sleeper wake elapsed at/above the request and below one task timeslice, with the bound
+  derived from the kernel-published `M00_08_SCHED_SLICES` constants rather than a magic number
+  (observed: 20129/20106/20160 of 20000 ticks against a 100000 task slice, count 1). This fails
+  both fixed task-slice polling (~100000) and fixed idle-slice polling (~1000000). Stack
+  pre-mapping stays a constructive invariant (mapping loop precedes hart release); no runtime
+  page-table instrumentation was added for it.
+- Hardened `Scheduler::add_task` to publish READY only after queue insertion succeeds.
+- Full local regression chain PASS: M00-02..M00-05, M00-06-02..04, M00-07-01..04, M00-08.01 x2
+  (now preemptible, markers unchanged), M00-08.02 x3, default no-probe RV64 build, clang-format.
+- Remaining for closure: push `agent/m00-08-02-close`, record the GitHub Actions run ID,
+  integrate to `main`. M00-08.02 stays ACTIVE — it is not flipped to DONE in this ledger until
+  the CI evidence is recorded. M00-08.03 activates only after that.
+
+### 2026-08-18 — M00-08.01 accepted; M00-08.02 scheduler alignment activated
+
+- Integrated the Hostboot-shaped task executive at `e930a24`.
+- Proved U-mode create, cooperative yield/context switch, clean end, completed and blocking wait,
+  idle fallback, detach, and full tracker lifecycle with GNU RV64/QEMU.
+- Confirmed executive managers are image-wide singletons while current task, local queue, delay
+  queue, idle task, and counters are per hart.
+- Pinned Hostboot `release-fw1120` reference commit
+  `22e3c409ab8b439d4c8eb31b644acb498032a487`.
+- Activated M00-08.02 to add mtime-driven preemption, per-hart sleep queues, deadline-aware idle,
+  and pre-release task-stack mapping.
+- Kept the service boundary explicit: static U tasks are executable; named service startup still
+  requires IPC, user-copy, component registry, and protected VSpaces.
 
 ### 2026-08-17 — boot-service/runtime architecture frozen; M00-08 activated
 

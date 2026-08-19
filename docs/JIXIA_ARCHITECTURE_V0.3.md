@@ -521,4 +521,6 @@ M09  Confidential LPAR prototype
 M10  Timing Core/SoC partition experiments
 ```
 
-The current next task remains a complete, testable TrapFrame.
+The current implementation increment is M00-08.02 Hostboot Scheduler Alignment: preemptive U-task
+dispatch, sleep/wakeup, and idle deadline policy on top of the accepted TrapFrame and task
+lifecycle foundation. Detailed live ordering remains in `docs/JIXIA_SOLO_ROADMAP.md`.

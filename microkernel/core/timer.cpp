@@ -27,25 +27,29 @@ void enable_global_interrupts()
     __asm__ volatile("csrs mstatus, %0" :: "r"(mstatus_mie) : "memory");
 }
 
-} // namespace
+void program_current_hart(uint64_t delta_ticks) {
+    const uint64_t now = jixia::platform::qemu_virt::timer::read_time();
 
+    const uint64_t delta = delta_ticks == 0U ? 1U : delta_ticks;
+    const uint64_t deadline = now > UINT64_MAX - delta ? UINT64_MAX : now + delta;
 
-void arm_once(uint64_t delta_ticks)
-{
-    hart::HartLocal& local =
-        hart::current();
-
-    const uint64_t now =
-        jixia::platform::qemu_virt::timer::read_time();
-
-    jixia::platform::qemu_virt::timer::set_compare(
-        local.hart_id,
-        now + delta_ticks);
-
-    enable_machine_timer_interrupt();
-    enable_global_interrupts();
+    arm_task_deadline(deadline);
 }
 
+} // namespace
+
+void arm_task_deadline(uint64_t deadline) {
+    hart::HartLocal& local = hart::current();
+
+    jixia::platform::qemu_virt::timer::set_compare(local.hart_id, deadline);
+
+    enable_machine_timer_interrupt();
+}
+
+void arm_once(uint64_t delta_ticks) {
+    program_current_hart(delta_ticks);
+    enable_global_interrupts();
+}
 
 void handle_interrupt()
 {

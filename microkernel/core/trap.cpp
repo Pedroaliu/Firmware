@@ -7,6 +7,7 @@
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
 #include "microkernel/core/task_syscall.h"
+#include "microkernel/core/time_manager.h"
 #include "microkernel/core/timer.h"
 
 extern "C" int jixia_trap_frame_test_is_active();
@@ -38,6 +39,12 @@ using jixia::arch::riscv::TrapFrame;
 using jixia::arch::riscv::Xlen;
 using jixia::arch::riscv::decode_breakpoint_at;
 using jixia::arch::riscv::instruction_length_bytes;
+
+namespace {
+
+constexpr Xlen kPreviousPrivilegeMask = Xlen{3U} << 11U;
+
+} // namespace
 
 [[noreturn]] void fatal(const TrapFrame& frame)
 {
@@ -72,13 +79,10 @@ using jixia::arch::riscv::instruction_length_bytes;
     }
 }
 
-[[nodiscard]]
-bool try_handle_machine_timer_interrupt(const TrapFrame& frame)
-{
+[[nodiscard]] bool try_handle_machine_timer_interrupt(TrapFrame& frame) {
     const TrapCause cause{frame.mcause};
 
-    if (!cause.is_interrupt(InterruptCode::machine_timer))
-    {
+    if (!cause.is_interrupt(InterruptCode::machine_timer)) {
         return false;
     }
 
@@ -87,6 +91,11 @@ bool try_handle_machine_timer_interrupt(const TrapFrame& frame)
      * advance frame.mepc: it already identifies the interrupted resume point.
      */
     timer::handle_interrupt();
+
+    /* Hostboot's decrementer path becomes Jixia's U-task timeslice path. */
+    if ((frame.mstatus & kPreviousPrivilegeMask) == 0U) {
+        time::TimeManager::instance().handle_timer_interrupt(frame);
+    }
     return true;
 }
 

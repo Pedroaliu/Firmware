@@ -38,11 +38,11 @@ TaskManager& TaskManager::instance() {
     return Singleton<TaskManager>::instance();
 }
 
-void TaskManager::initialize() {
+bool TaskManager::initialize() {
     SpinlockGuard guard(lock_);
 
     if (initialized_) {
-        return;
+        return true;
     }
 
     for (size_t index = 0U; index < kMaxTasks; ++index) {
@@ -53,10 +53,24 @@ void TaskManager::initialize() {
     }
 
     clear_bytes(g_task_stacks, sizeof(g_task_stacks));
+
+    /*
+     * The bootstrap VSpace is shared by all harts. Install every bounded
+     * task-stack mapping before secondary harts are released so later task
+     * creation never mutates a live shared page table without TLB shootdown.
+     */
+    for (size_t index = 0U; index < kMaxTasks; ++index) {
+        const uintptr_t stack_bottom = reinterpret_cast<uintptr_t>(&g_task_stacks[index][0]);
+        if (!memory::VmmManager::instance().map_boot_task_stack(stack_bottom, kTaskStackSize)) {
+            return false;
+        }
+    }
+
     root_tasks_ = nullptr;
     next_tid_ = 1U;
     initial_task_id_ = 0U;
     initialized_ = true;
+    return true;
 }
 
 Task* TaskManager::create_idle_task(hart::HartLocal& owner) {
@@ -168,6 +182,10 @@ TaskTracker* TaskManager::allocate_tracker_locked() {
 void TaskManager::release_task_locked(Task& task) {
     const size_t index = static_cast<size_t>(&task - &tasks_[0]);
     if (index >= kMaxTasks) {
+        fail_closed();
+    }
+
+    if (task.queued || task.delay.queued) {
         fail_closed();
     }
 
@@ -365,6 +383,10 @@ Task* TaskManager::get_current_task() {
 }
 
 void TaskManager::set_current_task(Task& task) {
+    if (task.state == TaskState::ended || task.queued || task.delay.queued) {
+        fail_closed();
+    }
+
     hart::HartLocal& local = hart::current();
     task.cpu = &local;
     task.state = TaskState::running;

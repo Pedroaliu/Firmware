@@ -118,7 +118,9 @@ MULTI_LPAR
   Boot0/microkernel -> ArchHV -> multiple peer logical partitions
 ```
 
-The final RISC-V M/S/U placement for firmware kernel and services is not yet frozen. Existing M00-06/M00-07 S-mode code is an acceptance context, not a production user-service model.
+The production boot placement is frozen as an M-mode bare Jixia microkernel plus Sv39-translated
+U-mode boot services. S-mode is intentionally unused by boot services and remains reserved for the
+later OS/hypervisor. Existing M00-06/M00-07 S-mode code is acceptance machinery only.
 
 ## Current state
 
@@ -134,6 +136,8 @@ DONE  F00-01  Kernel Print
 DONE  M00-05  per-hart state, private stacks, SMP foundation
 DONE  M00-06  privilege transition foundation
 DONE  M00-07  Pre-DDR Memory Foundation
+DONE  M00-08.01  Hostboot-shaped Task Executive
+NOW   M00-08.02  Hostboot Scheduler Alignment
 ```
 
 M00-07 establishes:
@@ -157,31 +161,29 @@ M00-07.04 also proves a fake DDR/mainstore mechanism prototype with stable firmw
 
 Full M00-07 code-closure regression: GitHub Actions run `32005255564` — SUCCESS.
 
-Design record:
+Design records:
 
 - [`docs/JIXIA_M00_07_MEMORY_FOUNDATION.md`](docs/JIXIA_M00_07_MEMORY_FOUNDATION.md)
+- [`docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDATION.md`](docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDATION.md)
+- [`docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`](docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md)
 
 ## Immediate next step
 
-The next step is an architecture research gate, not another synthetic memory probe.
-
-Study the Hostboot startup chain:
+Close M00-08.02 with machine-checkable evidence for Hostboot-shaped timer scheduling:
 
 ```text
-Base/kernel entry
-    -> task/scheduler
-    -> VMM
-    -> VFS / PNOR Resource Provider
-    -> first user/service task
-    -> InitService
-    -> istep dispatch
-    -> HWP invocation
-    -> memory isteps
-    -> proc_exit_cache_contained
-    -> MM_EXTEND_REAL_MEMORY / mainstore extension
+CPU-bound U task
+    -> mtime interrupt
+    -> save TaskContext
+    -> release expired sleepers
+    -> select local/global/idle task
+    -> restore selected TaskContext
+    -> program next task or wake deadline
+    -> mret
 ```
 
-Only after this flow is understood will Jixia freeze the next implementation milestone for firmware services/InitService and later return to production host-driven DDR initialization, real exit-contained, and post-DDR PNOR paging.
+Jixia can now create statically resident U-mode tasks. A real named `usr service` still requires
+message IPC, safe user-copy, a resident component registry, and protected per-service VSpaces.
 
 See:
 

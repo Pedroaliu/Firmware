@@ -1,6 +1,6 @@
 # Jixia M00-08 Hostboot-Shaped Executive Foundation
 
-**Status:** implementation candidate; RV64 compile/link verified; QEMU acceptance pending
+**Status:** accepted in `main` at `e930a24`; GNU RV64 build and QEMU lifecycle acceptance passed
 
 **Date:** 2026-08-18
 
@@ -17,7 +17,7 @@ Reference baseline:
 
 ```text
 OpenPOWER Hostboot release-fw1120
-commit 22e3c40984901a9f8b14be9c0426f2608453ca3e
+commit 22e3c409ab8b439d4c8eb31b644acb498032a487
 
 src/kernel/start.S
 src/kernel/kernel.C
@@ -198,3 +198,6 @@ Hostboot-equivalent functionality:
 
 These gaps are staged work, not reasons to change the Hostboot-shaped ownership and lifecycle now in
 place.
+
+M00-08.02 begins closing the timer-preemption and delay-queue items without rewriting the accepted
+M00-08.01 task/tracker model. See `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`.

@@ -4,12 +4,10 @@
 
 #include "microkernel/core/hart.h"
 
-
-namespace {
-
 extern "C" char __hart_stacks_start[];
 extern "C" char __hart_trap_stacks_start[];
 
+namespace {
 
 /*
  * Cleared by the boot hart before secondary harts enter C++.
@@ -54,9 +52,7 @@ void bind_hart_local(
         : "memory");
 }
 
-
 } // namespace
-
 
 namespace jixia::microkernel::hart {
 
@@ -89,6 +85,7 @@ HartLocal& initialize(
     local.delay_list = nullptr;
     local.idle_task = nullptr;
     local.timeslice_ticks = 0U;
+    local.scheduler_preemption_count = 0U;
 
     const uintptr_t stack_base =
         reinterpret_cast<uintptr_t>(__hart_stacks_start)

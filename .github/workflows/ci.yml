@@ -109,6 +109,15 @@ jobs:
         run: |
           bash scripts/test-m00-07-04-mainstore-transition.sh
 
+      - name: M00-08.01 Hostboot-shaped task lifecycle
+        run: |
+          bash scripts/test-m00-08-01-task-lifecycle.sh
+
+      - name: M00-08.02 Hostboot-shaped preemptive scheduler
+        run: |
+          JIXIA_QEMU_TIMEOUT_SECONDS=10 \
+            bash scripts/test-m00-08-02-preemptive-scheduler.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,3 +140,5 @@ jobs:
             build/m00-07-02/
             build/m00-07-03/
             build/m00-07-04/
+            build/m00-08-01/
+            build/m00-08-02/
