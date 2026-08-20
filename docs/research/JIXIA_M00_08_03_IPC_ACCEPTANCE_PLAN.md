@@ -137,6 +137,9 @@
 - **Expected:** -EDESTROYED delivered to R and A (single wake each); pending
   slots reclaimed (pool marker); subsequent send/recv/reply on EP → -EINVAL
   (generation bump makes the stale handle fail closed).
+  **[OPEN divergence: the reply-case errno here (`-EINVAL`) vs candidate
+  §3.5/§3.7 `-EDESTROYED` under the aliveness-first check order is
+  unresolved — decision pending with UNRESOLVED-6/11.]**
 - **Forbidden:** any participant left blocked forever; double wake; stale
   handle aliasing a recycled endpoint.
 

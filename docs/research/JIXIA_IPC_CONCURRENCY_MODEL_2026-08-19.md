@@ -181,7 +181,11 @@ H1: A: send(ep) concurrently — must not wake the dead B
   fails its clients. Lock order: `ep.lock` before TaskManager lock or vice
   versa — must be fixed globally (see §3).
 - M00-08.03 minimal stance: acceptance forbids ending a task that is blocked;
-  kernel cleanup path documented as UNRESOLVED-future.
+  kernel cleanup path documented as UNRESOLVED-future. (Second-pass update:
+  the data-structure cleanup hooks moved into M00-08.03 scope and are
+  exercised by crash-simulation teardown — architecture candidate §3.8,
+  acceptance C11/C17; full crash-path acceptance stays deferred and the
+  crash-reset error naming remains UNRESOLVED-12.)
 
 ### 2.9 Endpoint destruction with pending messages
 

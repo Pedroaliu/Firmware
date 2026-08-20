@@ -441,7 +441,7 @@ dereferences the raw user pointer). `_wake`: find/erase waiters, `addTask`,
 
 ---
 
-## Appendix A — Second-pass addendum (2026-08-19, after M00-08.02 closure directive)
+## Appendix A — Second-pass addendum (2026-08-19, after the M00-08.02 closure directive; M00-08.02 has since landed on `main` as `de4df0e` with CI run `32219284629`)
 
 ### A.1 Coverage map against the M00-08.03 task list
 

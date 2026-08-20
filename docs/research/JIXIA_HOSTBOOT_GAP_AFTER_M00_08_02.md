@@ -2,14 +2,18 @@
 
 - **Date:** 2026-08-19
 - **Branch:** `agent/m00-08-03-research`
-- **Baseline:** Jixia after M00-08.02 (task executive + preemptive scheduler,
-  local acceptance PASS, CI evidence pending) vs Hostboot `release-fw1120`
+- **Baseline:** Jixia after M00-08.02 (task executive + preemptive scheduler),
+  integrated on `main` as `de4df0e` (PR #26 merged) with GitHub Actions CI run
+  `32219284629` — RV64 QEMU regression SUCCESS — vs Hostboot `release-fw1120`
   kernel facilities (study: `JIXIA_HOSTBOOT_IPC_STUDY_2026-08-19.md`).
-- **Baseline note (second pass, 2026-08-19):** M00-08.02 was declared closed
-  by project directive; at write time `origin/main` still resolved to `e930a24`
-  with PR #26 open, so this analysis assumes the `agent/m00-08-02-close`
-  tip (`2503f89`) content as the accepted baseline. Canonical project files
-  are not edited from this research branch.
+- **Baseline note (status refreshed 2026-08-20):** M00-08.02 is closed on
+  `main`. The `agent/m00-08-02-close` tip analyzed at write time (`2503f89`)
+  is the exact content integrated as `de4df0e` (identical tree
+  `00d9de9b2e8d2ac70a68d2ee1932eb8d5a454a3b`); its CI run is `32219284629`.
+  `main` has since advanced to `f52e542` (CI infrastructure PR #28 —
+  hermetic/bounded validation; not an IPC milestone), which changes no
+  analyzed baseline content. Canonical project files are not edited from
+  this research branch.
 - **Status:** PROPOSAL ONLY. The canonical roadmap
   (`docs/JIXIA_SOLO_ROADMAP.md`) is intentionally NOT edited from a research
   branch; adoption happens through the normal milestone gate.

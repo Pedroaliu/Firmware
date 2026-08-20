@@ -328,7 +328,7 @@ Whoever's `recv`/`try_recv` consumes a message from the endpoint. The server
 role is acquired *by receiving*, not by creation: endpoint creation grants
 only a possession handle, not the receiver slot. There is no stored
 "server TaskId" in M00-08.03 (§4.1 deliberately has none); multi-receiver
-endpoints are allowed by the design and are server-side policy (UNRESOLVED-2).
+endpoints are allowed by the design and are server-side policy (UNRESOLVED-1).
 
 **What role does the kernel play?**
 Sole owner and sole mutator of all IPC kernel state: endpoint table,
@@ -382,7 +382,7 @@ Exactly four ways, each with its LP:
 | # | Cause | LP | Server observes |
 |---|---|---|---|
 | 1 | consumed by successful `reply` | token consume (T5) | 0 (registers written to client) |
-| 2 | endpoint `destroy` | DEAD flip (T7) | -EINVAL on reply (token voided) |
+| 2 | endpoint `destroy` | DEAD flip (T7) | -EINVAL on reply (token voided) **[OPEN divergence: §3.5/§3.7 return `-EDESTROYED` for a reply on a destroyed endpoint under the aliveness→token→ownership check order; to be settled with UNRESOLVED-6/11 — not decided here]** |
 | 3 | server task exit while holding it | exit cleanup (T8) | n/a (server is gone) |
 | 4 | client task end while blocked in `call` | client cleanup removes Transact (T8, concurrency model §2.14) | -EINVAL on reply (dead-letter drop, client already woken/ended) |
 
