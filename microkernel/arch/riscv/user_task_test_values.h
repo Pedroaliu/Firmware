@@ -10,3 +10,26 @@
 #define JIXIA_M00_08_SLEEP_RESULT 0x08020003
 #define JIXIA_M00_08_PREEMPT_INIT_RESULT 0x0802CAFE
 #define JIXIA_M00_08_PREEMPT_INIT_FAILURE 0x0802DEAD
+
+/*
+ * M00-08.03.01 non-blocking IPC acceptance values. Distinct payload words let
+ * the kernel verify FIFO order and sender identity at the linearization
+ * points; child result values let the END path confirm each user assertion.
+ */
+#define JIXIA_M00_08_IPC_INIT_RESULT 0x0803CAFE
+#define JIXIA_M00_08_IPC_INIT_FAILURE 0x0803DEAD
+
+#define JIXIA_M00_08_IPC_RECEIVER_CHILD_RESULT 0x08030001
+#define JIXIA_M00_08_IPC_FIFO_CHILD_RESULT 0x08030002
+#define JIXIA_M00_08_IPC_NONOWNER_CHILD_RESULT 0x08030003
+
+#define JIXIA_M00_08_IPC_WORD_C01 0x08031001
+#define JIXIA_M00_08_IPC_WORD_C03_1 0x08031011
+#define JIXIA_M00_08_IPC_WORD_C03_2 0x08031012
+#define JIXIA_M00_08_IPC_WORD_C03_3 0x08031013
+#define JIXIA_M00_08_IPC_WORD_C16_FIRST 0x08031021
+#define JIXIA_M00_08_IPC_WORD_C16_REST 0x08031022
+#define JIXIA_M00_08_IPC_WORD_C15 0x08031031
+
+/* Out-of-range index (16) with a nonzero generation epoch. */
+#define JIXIA_M00_08_IPC_GARBAGE_HANDLE 0xFFFFFFFF00000010

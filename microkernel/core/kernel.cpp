@@ -12,6 +12,7 @@
 
 extern "C" char jixia_user_init_task[];
 extern "C" char jixia_user_preemption_init_task[];
+extern "C" char jixia_user_ipc_init_task[];
 extern "C" void jixia_release_executive_harts();
 extern "C" [[noreturn]] void jixia_task_enter_first(jixia::arch::riscv::TrapFrame* frame,
                                                     uintptr_t satp);
@@ -74,7 +75,9 @@ bool Kernel::init_task_bootstrap() {
     hart::HartLocal& boot = cpu::CpuManager::instance().boot_hart();
     const auto& address_space = memory::VmmManager::instance().boot_address_space();
 
-#ifdef JIXIA_M00_08_02_PROBE
+#if defined(JIXIA_M00_08_03_01_PROBE)
+    const task::EntryPoint entry = reinterpret_cast<task::EntryPoint>(jixia_user_ipc_init_task);
+#elif defined(JIXIA_M00_08_02_PROBE)
     const task::EntryPoint entry =
         reinterpret_cast<task::EntryPoint>(jixia_user_preemption_init_task);
 #else
@@ -149,7 +152,9 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
-#ifdef JIXIA_M00_08_02_PROBE
+#if defined(JIXIA_M00_08_03_01_PROBE)
+    const char* executive_header = "[Jixia][M00-08.03.01][IpcNonblocking]";
+#elif defined(JIXIA_M00_08_02_PROBE)
     const char* executive_header = "[Jixia][M00-08.02][HostbootSchedulerAlignment]";
 #else
     const char* executive_header = "[Jixia][M00-08.01][HostbootTaskFoundation]";

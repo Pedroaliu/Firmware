@@ -260,3 +260,433 @@ jixia_user_sleep_task:
 .size jixia_user_sleep_task, . - jixia_user_sleep_task
 
 #endif
+
+#ifdef JIXIA_M00_08_03_01_PROBE
+
+/*
+ * M00-08.03.01 non-blocking IPC acceptance:
+ *
+ *   endpoint create/destroy lifecycle with generation isolation (C15)
+ *   send-before-recv persistence (C01), FIFO ordering (C03)
+ *   malformed and stale handles fail closed with -EINVAL (C14)
+ *   queue-full -EAGAIN and post-drain recovery (C16)
+ *   reserved blocking syscalls fail closed with -ENOSYS
+ */
+.balign 4
+.global jixia_user_ipc_init_task
+.type jixia_user_ipc_init_task, @function
+
+jixia_user_ipc_init_task:
+    /* 15 endpoint handles for the table-capacity case live at 0(sp)..112(sp). */
+    addi sp, sp, -160
+    sd ra, 152(sp)
+    sd s0, 144(sp)
+    sd s1, 136(sp)
+    sd s2, 128(sp)
+
+    /* 1. Bootstrap endpoint: typed handle, generation never zero. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    beqz a0, .Lipc_init_failure
+    mv s0, a0
+
+    /* 2. C01: send strictly before any receive attempt exists. */
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C01
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    la a0, jixia_user_ipc_receiver_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_init_failure
+
+    /* 3. C03: three sends; the consumer child checks FIFO order. */
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C03_1
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C03_2
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C03_3
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    la a0, jixia_user_ipc_fifo_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_init_failure
+
+    /* 4. C16: fill the 16-deep FIFO; the 17th send must be -EAGAIN. */
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C16_FIRST
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    li s2, 0
+.Lipc_c16_fill:
+    li t0, 15
+    bge s2, t0, .Lipc_c16_full_probe
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C16_REST
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+    addi s2, s2, 1
+    j .Lipc_c16_fill
+
+.Lipc_c16_full_probe:
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C16_REST
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -11
+    bne a0, t0, .Lipc_init_failure
+
+    /* Drain one message: the oldest (first-filled) word must survive. */
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_init_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C16_FIRST
+    bne a1, t0, .Lipc_init_failure
+
+    /* Recovery: the freed slot accepts one more send. */
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C16_REST
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+.Lipc_init_continue_1:
+
+    /* 5. C14: malformed handles fail closed with -EINVAL everywhere. */
+    li a0, JIXIA_M00_08_IPC_GARBAGE_HANDLE
+    li a1, JIXIA_M00_08_IPC_WORD_C01
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    li a0, JIXIA_M00_08_IPC_GARBAGE_HANDLE
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    li a0, JIXIA_M00_08_IPC_GARBAGE_HANDLE
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    li a0, 0
+    li a1, 0
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    /* 6. Non-owner destroy must be denied with -EACCES (child asserts). */
+    la a0, jixia_user_ipc_nonowner_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    /* Wait before the child runs: exercises the blocking wait + idle path. */
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_init_failure
+
+    /* 7. C15: destroy/recreate generation isolation on a recycled slot. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    /* Stale handle from the destroyed epoch: every operation -EINVAL. */
+    mv a0, s1
+    li a1, JIXIA_M00_08_IPC_WORD_C01
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    /* Recreate: same slot index, generation advanced by exactly one epoch. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    li t0, 0x100000000
+    add t0, s1, t0
+    bne a0, t0, .Lipc_init_failure
+    mv s1, a0
+
+    /* The new epoch works while the old alias above stays rejected. */
+    mv a0, s1
+    li a1, JIXIA_M00_08_IPC_WORD_C15
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_init_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C15
+    bne a1, t0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    /* 8. Reserved blocking syscall fails closed with -ENOSYS. */
+    li a0, 0
+    li a1, 0
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_CALL
+    ecall
+    li t0, -38
+    bne a0, t0, .Lipc_init_failure
+
+    /* 9. Table capacity: 16 endpoints total, the 17th create is -ENOSPC. */
+    li s2, 0
+.Lipc_fill_table:
+    li t0, 15
+    bge s2, t0, .Lipc_table_full_probe
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    slli t1, s2, 3
+    add t1, t1, sp
+    sd a0, 0(t1)
+    addi s2, s2, 1
+    j .Lipc_fill_table
+
+.Lipc_table_full_probe:
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    li t0, -28
+    bne a0, t0, .Lipc_init_failure
+
+    li s2, 0
+.Lipc_drain_table:
+    li t0, 15
+    bge s2, t0, .Lipc_final_cleanup
+    slli t1, s2, 3
+    add t1, t1, sp
+    ld a0, 0(t1)
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_init_failure
+    addi s2, s2, 1
+    j .Lipc_drain_table
+
+.Lipc_final_cleanup:
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    li a7, JIXIA_TASK_SYSCALL_DETACH
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    li a0, JIXIA_M00_08_IPC_INIT_RESULT
+    j .Lipc_init_return
+
+.Lipc_init_failure:
+    li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+
+.Lipc_init_return:
+    ld s2, 128(sp)
+    ld s1, 136(sp)
+    ld s0, 144(sp)
+    ld ra, 152(sp)
+    addi sp, sp, 160
+    ret
+
+.size jixia_user_ipc_init_task, . - jixia_user_ipc_init_task
+
+/* C01 consumer: pops the message persisted before any receive existed. */
+.balign 4
+.global jixia_user_ipc_receiver_child
+.type jixia_user_ipc_receiver_child, @function
+
+jixia_user_ipc_receiver_child:
+    /* a0 = endpoint handle created by the init task. */
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01
+    bne a1, t0, .Lipc_receiver_failure
+    li a0, JIXIA_M00_08_IPC_RECEIVER_CHILD_RESULT
+    ret
+
+.Lipc_receiver_failure:
+    li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+    ret
+
+.size jixia_user_ipc_receiver_child, . - jixia_user_ipc_receiver_child
+
+/* C03 consumer: three pops must arrive in send order. */
+.balign 4
+.global jixia_user_ipc_fifo_child
+.type jixia_user_ipc_fifo_child, @function
+
+jixia_user_ipc_fifo_child:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    sd s0, 0(sp)
+    mv s0, a0
+
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_fifo_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C03_1
+    bne a1, t0, .Lipc_fifo_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_fifo_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C03_2
+    bne a1, t0, .Lipc_fifo_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_fifo_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C03_3
+    bne a1, t0, .Lipc_fifo_failure
+
+    li a0, JIXIA_M00_08_IPC_FIFO_CHILD_RESULT
+    j .Lipc_fifo_return
+
+.Lipc_fifo_failure:
+    li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+
+.Lipc_fifo_return:
+    ld s0, 0(sp)
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+
+.size jixia_user_ipc_fifo_child, . - jixia_user_ipc_fifo_child
+
+/* Destroy of a foreign endpoint must be denied with -EACCES. */
+.balign 4
+.global jixia_user_ipc_nonowner_child
+.type jixia_user_ipc_nonowner_child, @function
+
+jixia_user_ipc_nonowner_child:
+    /* a0 = endpoint owned by the init task. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    li t0, -13
+    bne a0, t0, .Lipc_nonowner_failure
+    li a0, JIXIA_M00_08_IPC_NONOWNER_CHILD_RESULT
+    ret
+
+.Lipc_nonowner_failure:
+    li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+    ret
+
+.size jixia_user_ipc_nonowner_child, . - jixia_user_ipc_nonowner_child
+
+#endif
