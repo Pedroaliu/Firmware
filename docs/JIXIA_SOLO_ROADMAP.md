@@ -245,9 +245,13 @@ M00-08.03.01 froze the non-blocking subset of the research candidate
 
 ```text
 send-before-recv persists; FIFO order within an endpoint
-typed index+generation handles fail closed (malformed and stale)
+full register ABI: 4 payload words per message, receiver-visible sender TaskId
+typed index+generation handles fail closed (malformed, stale, bit-63-set)
+generation capped at 0x7fffffff; ceiling retires a slot forever (no ABA wrap)
+EndpointManager constructed boot-hart-first before secondary hart release
 destroy is owner-only (-EACCES) and clears messages + bumps generation
-recreate isolates epochs (old alias -EINVAL, new handle live at +1 epoch)
+recreate isolates epochs (old alias -EINVAL, new handle live at +1 epoch) [C14b]
+try_recv on an empty endpoint returns -EAGAIN immediately, never blocks [C15]
 queue-full is -EAGAIN at depth 16 and recovers after a drain
 reserved blocking syscalls (9/10/12) fail closed with -ENOSYS
 no blocking state, no scheduler interaction, no dynamic memory anywhere

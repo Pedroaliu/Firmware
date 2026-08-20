@@ -280,8 +280,12 @@ Increment 03.01 (implemented, local acceptance PASS) delivers the non-blocking s
 
 ```text
 static endpoint table (16) + per-endpoint spinlock + depth-16 FIFO
-typed index+generation handles (one uint64_t; generation never 0)
+typed index+generation handles (one uint64_t; bit 63 always 0;
+generation in [1, 0x7fffffff]; ceiling retires the slot, never wraps)
+EndpointManager constructed boot-hart-first (Kernel::ipc_bootstrap,
+before secondary hart release; thread-safe-statics are disabled)
 endpoint_create/destroy (owner-only) + ipc_send + ipc_try_recv
+full register ABI: 4 payload words + receiver-visible sender TaskId
 reserved numbers 9/10/12 (call/recv/reply) fail closed with -ENOSYS
 ```
 
@@ -382,12 +386,22 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 - Accepted ABI/design record added: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`
   (explicitly covers the research candidate's non-blocking leans; all blocking-side
   UNRESOLVED items remain open).
-- New acceptance `scripts/test-m00-08-03-01-ipc-nonblocking.sh`: C01 send-before-recv, C03 FIFO
-  order, C14 malformed/stale handles, C15 destroy/recreate generation isolation, C16 queue-full
-  `-EAGAIN` + recovery, plus owner-only destroy (`-EACCES`), table capacity (`-ENOSPC`), and
-  reserved-ABI `-ENOSYS` evidence — 36 required markers with 5 ordered-marker chains;
-  deterministic ×3 local runs PASS; M00-08.01 and M00-08.02 regressions PASS; clang-format and
-  `git diff --check` clean.
+- New acceptance `scripts/test-m00-08-03-01-ipc-nonblocking.sh`: C01 send-before-recv with the full
+  register ABI (four distinct payload words + a second sender task, receiver-asserted sender
+  TaskId), C03 FIFO order, C14 malformed/stale handles (including a bit-63-set epoch), C14b
+  destroy/recreate generation isolation (renamed from the first-pass "C15" label), C15 try_recv
+  never blocks (the research acceptance plan's real C15: empty endpoint returns `-EAGAIN`
+  immediately, before and after an interleaved send), C16 queue-full `-EAGAIN` + recovery, a
+  boot-time generation-ceiling/slot-retirement white-box probe, plus owner-only destroy
+  (`-EACCES`), table capacity (`-ENOSPC`), and reserved-ABI `-ENOSYS` evidence — 41 required
+  markers with 7 ordered-marker chains; deterministic ×3 local runs PASS; M00-08.01 and
+  M00-08.02 regressions PASS; clang-format and `git diff --check` clean.
+- Final-review fixes (PR #29 round): restored the acceptance plan's real C15 semantics and
+  renamed the destroy/recreate case to C14b; made `Kernel::ipc_bootstrap` construct
+  EndpointManager on the boot hart before secondary hart release (thread-safe-statics disabled);
+  capped the handle generation at `0x7fffffff` (bit 63 of a legal handle is always 0) with
+  permanent slot retirement at the ceiling instead of epoch wraparound (ABA-free); added the
+  four-word + sender-TaskId register ABI test.
 - M00-08.03 is NOT done: blocking recv/call/reply, ReplyToken/Transact, blocked_message
   transitions, task-exit IPC cleanup, capabilities, and registry routing are all still pending.
 

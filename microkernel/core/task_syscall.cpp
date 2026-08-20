@@ -45,14 +45,19 @@ bool g_ipc_recv_attempted = false;
 bool g_ipc_c01_sent_reported = false;
 bool g_ipc_c01_got_reported = false;
 bool g_ipc_c01_child_reported = false;
+bool g_ipc_c01_sender_tracked_reported = false;
 bool g_ipc_c03_got_1_reported = false;
 bool g_ipc_c03_got_2_reported = false;
 bool g_ipc_c03_got_3_reported = false;
 bool g_ipc_c03_fifo_reported = false;
 bool g_ipc_c14_malformed_reported = false;
+bool g_ipc_c14_bit63_reported = false;
 bool g_ipc_c14_stale_reported = false;
-bool g_ipc_c15_recycled_reported = false;
-bool g_ipc_c15_isolated_reported = false;
+bool g_ipc_c14b_recycled_reported = false;
+bool g_ipc_c14b_isolated_reported = false;
+bool g_ipc_c15_empty_reported = false;
+bool g_ipc_c15_send_reported = false;
+bool g_ipc_c15_nonblocking_reported = false;
 bool g_ipc_c16_full_reported = false;
 bool g_ipc_c16_oldest_reported = false;
 bool g_ipc_c16_recovered_reported = false;
@@ -246,10 +251,11 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             g_ipc_create_reported = true;
         }
 
-        if ((result == 0) && (ipc::EndpointHandle::from_raw(handle).generation > 1U) &&
-            !g_ipc_c15_recycled_reported) {
-            printk("M00_08_IPC_C15_RECYCLED_GENERATION: PASS\n");
-            g_ipc_c15_recycled_reported = true;
+        if ((result == 0) && (g_ipc_last_destroyed_handle != 0U) &&
+            (handle == g_ipc_last_destroyed_handle + (1ULL << 32U)) &&
+            !g_ipc_c14b_recycled_reported) {
+            printk("M00_08_IPC_C14B_RECYCLED_GENERATION: PASS\n");
+            g_ipc_c14b_recycled_reported = true;
         }
 
         if ((result == ipc::kErrorNoSpace) && !g_ipc_enospc_reported) {
@@ -294,10 +300,18 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 
 #ifdef JIXIA_M00_08_03_01_PROBE
         if (result == 0) {
-            if ((words[0] == JIXIA_M00_08_IPC_WORD_C01) && !g_ipc_recv_attempted &&
+            if ((words[0] == JIXIA_M00_08_IPC_WORD_C01_W0) &&
+                (words[1] == JIXIA_M00_08_IPC_WORD_C01_W1) &&
+                (words[2] == JIXIA_M00_08_IPC_WORD_C01_W2) &&
+                (words[3] == JIXIA_M00_08_IPC_WORD_C01_W3) && !g_ipc_recv_attempted &&
                 !g_ipc_c01_sent_reported) {
                 printk("M00_08_IPC_C01_A_SENT: PASS\n");
                 g_ipc_c01_sent_reported = true;
+            }
+
+            if ((words[0] == JIXIA_M00_08_IPC_WORD_C15) && !g_ipc_c15_send_reported) {
+                printk("M00_08_IPC_C15_INTERLEAVED_SEND: PASS\n");
+                g_ipc_c15_send_reported = true;
             }
 
             if ((g_ipc_full_handle != 0U) && (handle == g_ipc_full_handle) &&
@@ -316,6 +330,11 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             if ((handle == JIXIA_M00_08_IPC_GARBAGE_HANDLE) && !g_ipc_c14_malformed_reported) {
                 printk("M00_08_IPC_C14_MALFORMED: PASS\n");
                 g_ipc_c14_malformed_reported = true;
+            }
+
+            if ((handle == JIXIA_M00_08_IPC_BIT63_HANDLE) && !g_ipc_c14_bit63_reported) {
+                printk("M00_08_IPC_C14_BIT63_REJECTED: PASS\n");
+                g_ipc_c14_bit63_reported = true;
             }
 
             if ((g_ipc_last_destroyed_handle != 0U) && (handle == g_ipc_last_destroyed_handle) &&
@@ -349,10 +368,22 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
         if (result == 0) {
             const bool from_initial = message.sender == TaskManager::instance().initial_task_id();
 
-            if ((message.words[0] == JIXIA_M00_08_IPC_WORD_C01) && from_initial &&
+            if ((message.words[0] == JIXIA_M00_08_IPC_WORD_C01_W0) &&
+                (message.words[1] == JIXIA_M00_08_IPC_WORD_C01_W1) &&
+                (message.words[2] == JIXIA_M00_08_IPC_WORD_C01_W2) &&
+                (message.words[3] == JIXIA_M00_08_IPC_WORD_C01_W3) && from_initial &&
                 !g_ipc_c01_got_reported) {
                 printk("M00_08_IPC_C01_B_GOT: PASS\n");
                 g_ipc_c01_got_reported = true;
+            }
+
+            if ((message.words[0] == JIXIA_M00_08_IPC_WORD_C01B_W0) &&
+                (message.words[1] == JIXIA_M00_08_IPC_WORD_C01B_W1) &&
+                (message.words[2] == JIXIA_M00_08_IPC_WORD_C01B_W2) &&
+                (message.words[3] == JIXIA_M00_08_IPC_WORD_C01B_W3) && !from_initial &&
+                !g_ipc_c01_sender_tracked_reported) {
+                printk("M00_08_IPC_C01_SENDER_TRACKED: PASS\n");
+                g_ipc_c01_sender_tracked_reported = true;
             }
 
             if (from_initial && (message.words[0] == JIXIA_M00_08_IPC_WORD_C03_1) &&
@@ -379,9 +410,28 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
                 g_ipc_c16_oldest_reported = true;
             }
 
-            if ((message.words[0] == JIXIA_M00_08_IPC_WORD_C15) && !g_ipc_c15_isolated_reported) {
-                printk("M00_08_IPC_C15_ISOLATION: PASS\n");
-                g_ipc_c15_isolated_reported = true;
+            if ((message.words[0] == JIXIA_M00_08_IPC_WORD_C14B) && !g_ipc_c14b_isolated_reported) {
+                printk("M00_08_IPC_C14B_ISOLATION: PASS\n");
+                g_ipc_c14b_isolated_reported = true;
+            }
+        } else if (result == ipc::kErrorAgain) {
+            /*
+             * C15 (research acceptance plan): every try_recv on an empty
+             * endpoint returns -EAGAIN (= -EWOULDBLOCK) immediately. The
+             * marker order proves each syscall returned instead of blocking
+             * on this single-hart deterministic workload.
+             */
+            if (!g_ipc_c15_empty_reported) {
+                printk("M00_08_IPC_C15_EMPTY_EAGAIN: PASS\n");
+                g_ipc_c15_empty_reported = true;
+            } else if (!g_ipc_c15_nonblocking_reported) {
+                printk("M00_08_IPC_C15_NONBLOCKING: PASS\n");
+                g_ipc_c15_nonblocking_reported = true;
+            }
+        } else if (result == ipc::kErrorInvalidArgument) {
+            if ((handle == JIXIA_M00_08_IPC_BIT63_HANDLE) && !g_ipc_c14_bit63_reported) {
+                printk("M00_08_IPC_C14_BIT63_REJECTED: PASS\n");
+                g_ipc_c14_bit63_reported = true;
             }
         }
 #endif

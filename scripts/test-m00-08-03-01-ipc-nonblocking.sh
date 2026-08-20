@@ -113,9 +113,12 @@ for required_marker in \
     "M00_08_TASK_WAIT_BLOCK: PASS" \
     "M00_08_TASK_DETACH: PASS" \
     "M00_08_IDLE_TASK: PASS" \
+    "M00_08_IPC_GENERATION_CEILING: PASS" \
+    "M00_08_IPC_SLOT_RETIREMENT: PASS" \
     "M00_08_IPC_ENDPOINT_CREATE: PASS" \
     "M00_08_IPC_C01_A_SENT: PASS" \
     "M00_08_IPC_C01_B_GOT: PASS" \
+    "M00_08_IPC_C01_SENDER_TRACKED: PASS" \
     "M00_08_IPC_C01_SEND_BEFORE_RECV: PASS" \
     "M00_08_IPC_C03_GOT_1: PASS" \
     "M00_08_IPC_C03_GOT_2: PASS" \
@@ -125,11 +128,15 @@ for required_marker in \
     "M00_08_IPC_C16_POP_OLDEST: PASS" \
     "M00_08_IPC_C16_RECOVER: PASS" \
     "M00_08_IPC_C14_MALFORMED: PASS" \
+    "M00_08_IPC_C14_BIT63_REJECTED: PASS" \
     "M00_08_IPC_DESTROY_NONOWNER: PASS" \
     "M00_08_IPC_ENDPOINT_DESTROY: PASS" \
     "M00_08_IPC_C14_STALE: PASS" \
-    "M00_08_IPC_C15_RECYCLED_GENERATION: PASS" \
-    "M00_08_IPC_C15_ISOLATION: PASS" \
+    "M00_08_IPC_C14B_RECYCLED_GENERATION: PASS" \
+    "M00_08_IPC_C14B_ISOLATION: PASS" \
+    "M00_08_IPC_C15_EMPTY_EAGAIN: PASS" \
+    "M00_08_IPC_C15_INTERLEAVED_SEND: PASS" \
+    "M00_08_IPC_C15_NONBLOCKING: PASS" \
     "M00_08_IPC_RESERVED_ENOSYS: PASS" \
     "M00_08_IPC_ENDPOINT_ENOSPC: PASS" \
     "M00_08_IPC_NONBLOCKING: PASS"
@@ -165,11 +172,13 @@ check_marker_order() {
     done
 }
 
-# C01: the send linearization point precedes the receive-side delivery and the
-# consumer's own payload/sender assertion (send-before-recv persistence).
+# C01: the send linearization point precedes the receive-side delivery, the
+# second-sender delivery (sender TaskId tracking), and the consumer's own
+# full-register assertion (send-before-recv persistence).
 check_marker_order \
     "M00_08_IPC_C01_A_SENT" \
     "M00_08_IPC_C01_B_GOT" \
+    "M00_08_IPC_C01_SENDER_TRACKED" \
     "M00_08_IPC_C01_SEND_BEFORE_RECV"
 
 # C03: FIFO pops surface in send order 1, 2, 3 before the child's summary.
@@ -185,13 +194,27 @@ check_marker_order \
     "M00_08_IPC_C16_POP_OLDEST" \
     "M00_08_IPC_C16_RECOVER"
 
-# C15: destroy precedes every stale-handle rejection, which precedes the
+# C14b: destroy precedes every stale-handle rejection, which precedes the
 # recycled-generation recreate and the new-epoch delivery.
 check_marker_order \
     "M00_08_IPC_ENDPOINT_DESTROY" \
     "M00_08_IPC_C14_STALE" \
-    "M00_08_IPC_C15_RECYCLED_GENERATION" \
-    "M00_08_IPC_C15_ISOLATION"
+    "M00_08_IPC_C14B_RECYCLED_GENERATION" \
+    "M00_08_IPC_C14B_ISOLATION"
+
+# C15 (research acceptance plan): the empty-queue -EAGAIN precedes the
+# interleaved send, which precedes the post-drain -EAGAIN. Every marker is
+# emitted after the syscall returned, so the chain is the never-blocks proof.
+check_marker_order \
+    "M00_08_IPC_C15_EMPTY_EAGAIN" \
+    "M00_08_IPC_C15_INTERLEAVED_SEND" \
+    "M00_08_IPC_C15_NONBLOCKING"
+
+# Generation ceiling: the epoch-cap evidence precedes the slot-retirement
+# evidence (boot-time white-box probe on the boot hart).
+check_marker_order \
+    "M00_08_IPC_GENERATION_CEILING" \
+    "M00_08_IPC_SLOT_RETIREMENT"
 
 # The endpoint must exist before the first send can succeed on it.
 check_marker_order \

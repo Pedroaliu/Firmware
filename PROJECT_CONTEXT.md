@@ -368,8 +368,11 @@ Actual increment ledger:
 08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
   .03.01 DONE*   non-blocking Endpoint/Message IPC: static 16-slot endpoint
                  table, per-endpoint spinlock + depth-16 FIFO, typed
-                 index+generation handles, syscalls 6/7/8/11 (9/10/12
-                 reserved -> -ENOSYS), local acceptance PASS
+                 index+generation handles (bit 63 clear, generation
+                 1..0x7fffffff, ceiling retires the slot), boot-hart-first
+                 EndpointManager construction, full 4-word + sender-TaskId
+                 register ABI, syscalls 6/7/8/11 (9/10/12 reserved ->
+                 -ENOSYS), local acceptance PASS
                  (* CI evidence recorded at integration)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry

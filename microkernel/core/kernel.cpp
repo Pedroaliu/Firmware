@@ -4,6 +4,7 @@
 #include "microkernel/console/printk.h"
 #include "microkernel/core/cpu_manager.h"
 #include "microkernel/core/heap_manager.h"
+#include "microkernel/core/ipc_manager.h"
 #include "microkernel/core/scheduler.h"
 #include "microkernel/core/task_manager.h"
 #include "microkernel/core/time_manager.h"
@@ -61,6 +62,24 @@ bool Kernel::cpu_bootstrap(hart::HartIndex present_count) {
         return false;
     }
     return cpu::CpuManager::instance().initialize(present_count);
+}
+
+void Kernel::ipc_bootstrap() {
+    /*
+     * Boot-hart-first Singleton rule: hosted thread-safe-static support is
+     * disabled, so the IPC executive is explicitly constructed on the boot
+     * hart before jixia_release_executive_harts() lets secondary harts run.
+     */
+    ipc::EndpointManager::instance();
+
+#ifdef JIXIA_M00_08_03_01_PROBE
+    if (ipc::EndpointManager::debug_probe_generation_ceiling()) {
+        printk("M00_08_IPC_GENERATION_CEILING: PASS\n");
+        printk("M00_08_IPC_SLOT_RETIREMENT: PASS\n");
+    } else {
+        printk("M00_08_IPC_GENERATION_CEILING: FAIL\n");
+    }
+#endif
 }
 
 void Kernel::platform_status_bootstrap() {
@@ -145,6 +164,7 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
+    ipc_bootstrap();
     platform_status_bootstrap();
     debug_bootstrap();
     if (!init_task_bootstrap()) {

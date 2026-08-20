@@ -291,22 +291,33 @@ jixia_user_ipc_init_task:
     beqz a0, .Lipc_init_failure
     mv s0, a0
 
-    /* 2. C01: send strictly before any receive attempt exists. */
+    /*
+     * 2. C01: send strictly before any receive attempt exists. Four distinct
+     * payload words exercise the full a1..a4 send/recv register ABI.
+     */
     mv a0, s0
-    li a1, JIXIA_M00_08_IPC_WORD_C01
-    li a2, 0
-    li a3, 0
-    li a4, 0
+    li a1, JIXIA_M00_08_IPC_WORD_C01_W0
+    li a2, JIXIA_M00_08_IPC_WORD_C01_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C01_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C01_W3
     li a7, JIXIA_TASK_SYSCALL_SEND
     ecall
     bnez a0, .Lipc_init_failure
+
+    /* A second sender task queues its own four-word payload next (FIFO). */
+    la a0, jixia_user_ipc_sender_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
 
     la a0, jixia_user_ipc_receiver_child
     mv a1, s0
     li a7, JIXIA_TASK_SYSCALL_CREATE
     ecall
     bltz a0, .Lipc_init_failure
-    mv s1, a0
+    mv s2, a0
 
     li a7, JIXIA_TASK_SYSCALL_YIELD
     ecall
@@ -317,6 +328,13 @@ jixia_user_ipc_init_task:
     li a7, JIXIA_TASK_SYSCALL_WAIT
     ecall
     bne a0, s1, .Lipc_init_failure
+
+    mv a0, s2
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s2, .Lipc_init_failure
 
     /* 3. C03: three sends; the consumer child checks FIFO order. */
     mv a0, s0
@@ -421,7 +439,7 @@ jixia_user_ipc_init_task:
 
     /* 5. C14: malformed handles fail closed with -EINVAL everywhere. */
     li a0, JIXIA_M00_08_IPC_GARBAGE_HANDLE
-    li a1, JIXIA_M00_08_IPC_WORD_C01
+    li a1, JIXIA_M00_08_IPC_WORD_C01_W0
     li a2, 0
     li a3, 0
     li a4, 0
@@ -452,23 +470,28 @@ jixia_user_ipc_init_task:
     li t0, -22
     bne a0, t0, .Lipc_init_failure
 
-    /* 6. Non-owner destroy must be denied with -EACCES (child asserts). */
-    la a0, jixia_user_ipc_nonowner_child
-    mv a1, s0
-    li a7, JIXIA_TASK_SYSCALL_CREATE
-    ecall
-    bltz a0, .Lipc_init_failure
-    mv s1, a0
-
-    /* Wait before the child runs: exercises the blocking wait + idle path. */
-    mv a0, s1
-    li a1, 0
+    /* Bit 63 set (generation 0x80000000): never a legal handle value. */
+    li a0, JIXIA_M00_08_IPC_BIT63_HANDLE
+    li a1, JIXIA_M00_08_IPC_WORD_C01_W0
     li a2, 0
-    li a7, JIXIA_TASK_SYSCALL_WAIT
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
     ecall
-    bne a0, s1, .Lipc_init_failure
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
 
-    /* 7. C15: destroy/recreate generation isolation on a recycled slot. */
+    li a0, JIXIA_M00_08_IPC_BIT63_HANDLE
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_init_failure
+
+    /*
+     * 6. C14b: destroy/recreate generation isolation on a recycled slot.
+     * (Renamed from the first-pass "C15" label; the C15 id belongs to the
+     * try_recv-never-blocks case in the research acceptance plan.)
+     */
     li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
     ecall
     bltz a0, .Lipc_init_failure
@@ -481,7 +504,7 @@ jixia_user_ipc_init_task:
 
     /* Stale handle from the destroyed epoch: every operation -EINVAL. */
     mv a0, s1
-    li a1, JIXIA_M00_08_IPC_WORD_C01
+    li a1, JIXIA_M00_08_IPC_WORD_C01_W0
     li a2, 0
     li a3, 0
     li a4, 0
@@ -513,6 +536,45 @@ jixia_user_ipc_init_task:
 
     /* The new epoch works while the old alias above stays rejected. */
     mv a0, s1
+    li a1, JIXIA_M00_08_IPC_WORD_C14B
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_init_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C14B
+    bne a1, t0, .Lipc_init_failure
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_init_failure
+
+    /*
+     * 7. C15 (research acceptance plan): try_recv never blocks. An empty
+     * endpoint returns -EAGAIN (= -EWOULDBLOCK) immediately; on this
+     * single-hart deterministic workload the marker order itself proves each
+     * syscall returned (a blocking try_recv would hang the boot and the
+     * summary marker would never appear).
+     */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -11
+    bne a0, t0, .Lipc_init_failure
+
+    mv a0, s1
     li a1, JIXIA_M00_08_IPC_WORD_C15
     li a2, 0
     li a3, 0
@@ -528,12 +590,35 @@ jixia_user_ipc_init_task:
     li t0, JIXIA_M00_08_IPC_WORD_C15
     bne a1, t0, .Lipc_init_failure
 
+    /* Drained again: still an immediate -EAGAIN, never a block. */
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -11
+    bne a0, t0, .Lipc_init_failure
+
     mv a0, s1
     li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
     ecall
     bnez a0, .Lipc_init_failure
 
-    /* 8. Reserved blocking syscall fails closed with -ENOSYS. */
+    /* 8. Non-owner destroy must be denied with -EACCES (child asserts). */
+    la a0, jixia_user_ipc_nonowner_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_init_failure
+    mv s1, a0
+
+    /* Wait before the child runs: exercises the blocking wait + idle path. */
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_init_failure
+
+    /* 9. Reserved blocking syscall fails closed with -ENOSYS. */
     li a0, 0
     li a1, 0
     li a2, 0
@@ -544,7 +629,7 @@ jixia_user_ipc_init_task:
     li t0, -38
     bne a0, t0, .Lipc_init_failure
 
-    /* 9. Table capacity: 16 endpoints total, the 17th create is -ENOSPC. */
+    /* 10. Table capacity: 16 endpoints total, the 17th create is -ENOSPC. */
     li s2, 0
 .Lipc_fill_table:
     li t0, 15
@@ -603,23 +688,89 @@ jixia_user_ipc_init_task:
 
 .size jixia_user_ipc_init_task, . - jixia_user_ipc_init_task
 
-/* C01 consumer: pops the message persisted before any receive existed. */
+/*
+ * C01 second sender: a distinct task queues its own four-word payload so the
+ * receiver can prove the a5 sender-TaskId return tracks the real sender.
+ */
+.balign 4
+.global jixia_user_ipc_sender_child
+.type jixia_user_ipc_sender_child, @function
+
+jixia_user_ipc_sender_child:
+    /* a0 = endpoint handle created by the init task. */
+    li a1, JIXIA_M00_08_IPC_WORD_C01B_W0
+    li a2, JIXIA_M00_08_IPC_WORD_C01B_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C01B_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C01B_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_sender_failure
+    li a0, JIXIA_M00_08_IPC_SENDER_CHILD_RESULT
+    ret
+
+.Lipc_sender_failure:
+    li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+    ret
+
+.size jixia_user_ipc_sender_child, . - jixia_user_ipc_sender_child
+
+/*
+ * C01 consumer: pops both messages. All four payload registers a1..a4 must
+ * carry the exact words each sender wrote, and a5 (sender TaskId) must change
+ * between the two pops — the second message came from a different task.
+ */
 .balign 4
 .global jixia_user_ipc_receiver_child
 .type jixia_user_ipc_receiver_child, @function
 
 jixia_user_ipc_receiver_child:
-    /* a0 = endpoint handle created by the init task. */
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    sd s0, 16(sp)
+    sd s1, 8(sp)
+    mv s1, a0
+
+    mv a0, s1
     li a7, JIXIA_TASK_SYSCALL_TRY_RECV
     ecall
     bnez a0, .Lipc_receiver_failure
-    li t0, JIXIA_M00_08_IPC_WORD_C01
+    li t0, JIXIA_M00_08_IPC_WORD_C01_W0
     bne a1, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01_W1
+    bne a2, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01_W2
+    bne a3, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01_W3
+    bne a4, t0, .Lipc_receiver_failure
+    /* Remember the first sender's TaskId (the init task). */
+    mv s0, a5
+
+    mv a0, s1
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01B_W0
+    bne a1, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01B_W1
+    bne a2, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01B_W2
+    bne a3, t0, .Lipc_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C01B_W3
+    bne a4, t0, .Lipc_receiver_failure
+    /* Sender identity must track the real sender: a different task now. */
+    beq a5, s0, .Lipc_receiver_failure
+
     li a0, JIXIA_M00_08_IPC_RECEIVER_CHILD_RESULT
-    ret
+    j .Lipc_receiver_return
 
 .Lipc_receiver_failure:
     li a0, JIXIA_M00_08_IPC_INIT_FAILURE
+
+.Lipc_receiver_return:
+    ld s1, 8(sp)
+    ld s0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
     ret
 
 .size jixia_user_ipc_receiver_child, . - jixia_user_ipc_receiver_child
