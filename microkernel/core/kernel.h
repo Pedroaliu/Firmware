@@ -21,6 +21,7 @@ class Kernel final {
     [[nodiscard]] bool boot_data_bootstrap();
     [[nodiscard]] bool memory_bootstrap();
     [[nodiscard]] bool cpu_bootstrap(hart::HartIndex present_count);
+    void ipc_bootstrap();
     void platform_status_bootstrap();
     void debug_bootstrap();
     [[nodiscard]] bool init_task_bootstrap();

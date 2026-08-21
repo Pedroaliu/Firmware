@@ -10,3 +10,40 @@
 #define JIXIA_M00_08_SLEEP_RESULT 0x08020003
 #define JIXIA_M00_08_PREEMPT_INIT_RESULT 0x0802CAFE
 #define JIXIA_M00_08_PREEMPT_INIT_FAILURE 0x0802DEAD
+
+/*
+ * M00-08.03.01 non-blocking IPC acceptance values. Distinct payload words (the
+ * C01 send uses four of them, one per a1..a4 register) let the kernel and the
+ * U-mode consumers verify FIFO order, the full register ABI, and sender
+ * identity at the linearization points; child result values let the END path
+ * confirm each user assertion.
+ */
+#define JIXIA_M00_08_IPC_INIT_RESULT 0x0803CAFE
+#define JIXIA_M00_08_IPC_INIT_FAILURE 0x0803DEAD
+
+#define JIXIA_M00_08_IPC_RECEIVER_CHILD_RESULT 0x08030001
+#define JIXIA_M00_08_IPC_FIFO_CHILD_RESULT 0x08030002
+#define JIXIA_M00_08_IPC_NONOWNER_CHILD_RESULT 0x08030003
+#define JIXIA_M00_08_IPC_SENDER_CHILD_RESULT 0x08030004
+
+#define JIXIA_M00_08_IPC_WORD_C01_W0 0x08031001
+#define JIXIA_M00_08_IPC_WORD_C01_W1 0x08031002
+#define JIXIA_M00_08_IPC_WORD_C01_W2 0x08031003
+#define JIXIA_M00_08_IPC_WORD_C01_W3 0x08031004
+#define JIXIA_M00_08_IPC_WORD_C01B_W0 0x08031005
+#define JIXIA_M00_08_IPC_WORD_C01B_W1 0x08031006
+#define JIXIA_M00_08_IPC_WORD_C01B_W2 0x08031007
+#define JIXIA_M00_08_IPC_WORD_C01B_W3 0x08031008
+#define JIXIA_M00_08_IPC_WORD_C03_1 0x08031011
+#define JIXIA_M00_08_IPC_WORD_C03_2 0x08031012
+#define JIXIA_M00_08_IPC_WORD_C03_3 0x08031013
+#define JIXIA_M00_08_IPC_WORD_C16_FIRST 0x08031021
+#define JIXIA_M00_08_IPC_WORD_C16_REST 0x08031022
+#define JIXIA_M00_08_IPC_WORD_C14B 0x08031031
+#define JIXIA_M00_08_IPC_WORD_C15 0x08031041
+
+/* Out-of-range index (16) with a nonzero generation epoch. */
+#define JIXIA_M00_08_IPC_GARBAGE_HANDLE 0xFFFFFFFF00000010
+
+/* In-range index 0 but generation 0x80000000: bit 63 set, never a legal handle. */
+#define JIXIA_M00_08_IPC_BIT63_HANDLE 0x8000000000000000

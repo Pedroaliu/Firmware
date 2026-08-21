@@ -56,6 +56,12 @@ option(
     OFF
 )
 
+option(
+    JIXIA_M00_08_03_01_PROBE
+    "Boot the M00-08.03.01 non-blocking Endpoint/Message IPC probe"
+    OFF
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -156,6 +162,7 @@ add_executable(
     microkernel/core/task_context.cpp
     microkernel/core/task_manager.cpp
     microkernel/core/task_syscall.cpp
+    microkernel/core/ipc_manager.cpp
     microkernel/core/scheduler.cpp
     microkernel/core/heap_manager.cpp
     microkernel/core/vmm_manager.cpp
@@ -248,6 +255,14 @@ if(JIXIA_M00_08_02_PROBE)
         jixia.elf
         PRIVATE
             JIXIA_M00_08_02_PROBE=1
+    )
+endif()
+
+if(JIXIA_M00_08_03_01_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_08_03_01_PROBE=1
     )
 endif()
 

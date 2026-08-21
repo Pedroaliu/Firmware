@@ -8,8 +8,8 @@
 - **Project/platform:** 稷下 / **Jixia**
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
-- **Latest completed milestone:** `M00-08.01 Hostboot-shaped Task Executive`
-- **Current implementation milestone:** `M00-08.02 Hostboot Scheduler Alignment` — code complete, local acceptance PASS; NOT DONE until CI evidence is recorded
+- **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE (`de4df0e`, PR #26; CI run `32219284629`)
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; first increment M00-08.03.01 (non-blocking Endpoint/Message IPC) implemented with local acceptance PASS
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
@@ -356,22 +356,33 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 ## 11. Current implementation — M00-08
 
 M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
-at `e930a24`; M00-08.02 is code-complete with deterministic local acceptance evidence and stays
-ACTIVE until the CI run ID is recorded at integration.
+at `e930a24`; M00-08.02 is DONE at `de4df0e` (CI run `32219284629`); M00-08.03 is ACTIVE with its
+first increment implemented.
 
 Actual increment ledger:
 
 ```text
-08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
-               + ready queues + idle + create/yield/end/wait/detach
-08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
-                (local acceptance x3 PASS; CI/integration evidence pending)
-08.03  NEXT    message queue + blocking/wakeup IPC
-08.04  NEXT    safe user-copy/translation syscall boundary
-08.05  NEXT    resident Root Component Registry
-08.06  NEXT    init_main -> registry -> InitService
-08.07  NEXT    minimal Base InitService lifecycle
+08.01    DONE    TaskContext + U dispatch + task/tracker lifecycle
+                 + ready queues + idle + create/yield/end/wait/detach
+08.02    DONE    mtime preemption + sleep/wakeup + deadline-aware idle
+08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
+  .03.01 DONE*   non-blocking Endpoint/Message IPC: static 16-slot endpoint
+                 table, per-endpoint spinlock + depth-16 FIFO, typed
+                 index+generation handles (bit 63 clear, generation
+                 1..0x7fffffff, ceiling retires the slot), boot-hart-first
+                 EndpointManager construction, full 4-word + sender-TaskId
+                 register ABI, syscalls 6/7/8/11 (9/10/12 reserved ->
+                 -ENOSYS), local acceptance PASS
+                 (* CI evidence recorded at integration)
+08.04    NEXT    safe user-copy/translation syscall boundary
+08.05    NEXT    resident Root Component Registry
+08.06    NEXT    init_main -> registry -> InitService
+08.07    NEXT    minimal Base InitService lifecycle
 ```
+
+Accepted M00-08.03.01 ABI record: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`
+(covers the research candidate's non-blocking leans; blocking IPC, ReplyToken,
+and task-exit cleanup remain open for later M00-08.03 increments).
 
 M00-08.02 translated Hostboot's decrementer and delay-list policy to RISC-V `mtime`: save the
 interrupted U task, release expired sleepers, select local/global/idle work, restore the selected
@@ -388,7 +399,7 @@ supported now:
 
 not yet a real usr service:
     no named component registry/task_exec
-    no message IPC
+    non-blocking message IPC only (blocking/wakeup paths pending)
     no safe user-copy
     no protected per-service VSpace
 ```

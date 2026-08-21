@@ -4,6 +4,7 @@
 #include "microkernel/console/printk.h"
 #include "microkernel/core/cpu_manager.h"
 #include "microkernel/core/heap_manager.h"
+#include "microkernel/core/ipc_manager.h"
 #include "microkernel/core/scheduler.h"
 #include "microkernel/core/task_manager.h"
 #include "microkernel/core/time_manager.h"
@@ -12,6 +13,7 @@
 
 extern "C" char jixia_user_init_task[];
 extern "C" char jixia_user_preemption_init_task[];
+extern "C" char jixia_user_ipc_init_task[];
 extern "C" void jixia_release_executive_harts();
 extern "C" [[noreturn]] void jixia_task_enter_first(jixia::arch::riscv::TrapFrame* frame,
                                                     uintptr_t satp);
@@ -62,6 +64,24 @@ bool Kernel::cpu_bootstrap(hart::HartIndex present_count) {
     return cpu::CpuManager::instance().initialize(present_count);
 }
 
+void Kernel::ipc_bootstrap() {
+    /*
+     * Boot-hart-first Singleton rule: hosted thread-safe-static support is
+     * disabled, so the IPC executive is explicitly constructed on the boot
+     * hart before jixia_release_executive_harts() lets secondary harts run.
+     */
+    ipc::EndpointManager::instance();
+
+#ifdef JIXIA_M00_08_03_01_PROBE
+    if (ipc::EndpointManager::debug_probe_generation_ceiling()) {
+        printk("M00_08_IPC_GENERATION_CEILING: PASS\n");
+        printk("M00_08_IPC_SLOT_RETIREMENT: PASS\n");
+    } else {
+        printk("M00_08_IPC_GENERATION_CEILING: FAIL\n");
+    }
+#endif
+}
+
 void Kernel::platform_status_bootstrap() {
     /* Platform scratch/status publication is deferred until its ABI exists. */
 }
@@ -74,7 +94,9 @@ bool Kernel::init_task_bootstrap() {
     hart::HartLocal& boot = cpu::CpuManager::instance().boot_hart();
     const auto& address_space = memory::VmmManager::instance().boot_address_space();
 
-#ifdef JIXIA_M00_08_02_PROBE
+#if defined(JIXIA_M00_08_03_01_PROBE)
+    const task::EntryPoint entry = reinterpret_cast<task::EntryPoint>(jixia_user_ipc_init_task);
+#elif defined(JIXIA_M00_08_02_PROBE)
     const task::EntryPoint entry =
         reinterpret_cast<task::EntryPoint>(jixia_user_preemption_init_task);
 #else
@@ -142,6 +164,7 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
+    ipc_bootstrap();
     platform_status_bootstrap();
     debug_bootstrap();
     if (!init_task_bootstrap()) {
@@ -149,7 +172,9 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
-#ifdef JIXIA_M00_08_02_PROBE
+#if defined(JIXIA_M00_08_03_01_PROBE)
+    const char* executive_header = "[Jixia][M00-08.03.01][IpcNonblocking]";
+#elif defined(JIXIA_M00_08_02_PROBE)
     const char* executive_header = "[Jixia][M00-08.02][HostbootSchedulerAlignment]";
 #else
     const char* executive_header = "[Jixia][M00-08.01][HostbootTaskFoundation]";

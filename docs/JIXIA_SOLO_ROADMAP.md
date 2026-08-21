@@ -4,21 +4,26 @@
 
 This is the canonical execution plan for Jixia's current one-person development mode.
 
-**Last updated:** 2026-08-19
+**Last updated:** 2026-08-20
 
-**Latest completed milestone:** M00-08.01 Hostboot-shaped Task Executive
+**Latest completed milestone:** M00-08.02 Hostboot Scheduler Alignment — DONE
+(`de4df0e`, PR #26; CI run `32219284629`)
 
-**Current milestone:** M00-08.02 Hostboot Scheduler Alignment — code complete, local acceptance
-PASS ×3; NOT DONE until the GitHub Actions run ID is recorded at integration
+**Current milestone:** M00-08.03 Message IPC Foundation — ACTIVE. First increment
+M00-08.03.01 (non-blocking Endpoint/Message IPC) is implemented with local
+acceptance PASS ×3; integration PR pending.
 
-**Immediate next step:** push `agent/m00-08-02-close`, record the GitHub Actions run ID,
-integrate M00-08.02 into `main`, flip it to DONE, then start M00-08.03 design.
+**Immediate next step:** review/merge the M00-08.03.01 PR (record the CI run ID),
+then design the blocking IPC increment (blocking recv, call/reply, ReplyToken)
+from the accepted research candidate.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
 Current implementation checkpoint: `docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDATION.md`.
 
 Active scheduler checkpoint: `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`.
+
+Active IPC checkpoint: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`.
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
@@ -174,14 +179,18 @@ M00-06/M00-07 S-mode contexts remain mechanism tests only.
 ### M00-08 increment ledger
 
 ```text
-08.01  DONE    TaskContext + U dispatch + task/tracker lifecycle
-               + ready queues + idle + create/yield/end/wait/detach
-08.02  ACTIVE  mtime preemption + sleep/wakeup + deadline-aware idle
-08.03  NEXT    message queue + blocking/wakeup IPC foundation
-08.04  NEXT    safe user-copy/translation syscall boundary
-08.05  NEXT    resident Root Component Registry / prebuilt component catalog
-08.06  NEXT    init_main bootstrap -> registry -> InitService
-08.07  NEXT    minimal Base InitService task list and lifecycle acceptance
+08.01    DONE    TaskContext + U dispatch + task/tracker lifecycle
+                 + ready queues + idle + create/yield/end/wait/detach
+08.02    DONE    mtime preemption + sleep/wakeup + deadline-aware idle
+08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
+  .03.01 DONE*   non-blocking Endpoint/Message IPC (static table, typed
+                 handles, send/try_recv; syscalls 6/7/8/11, 9/10/12
+                 reserved -> -ENOSYS); local acceptance x3 PASS
+                 (* CI run ID recorded at integration)
+08.04    NEXT    safe user-copy/translation syscall boundary
+08.05    NEXT    resident Root Component Registry / prebuilt component catalog
+08.06    NEXT    init_main bootstrap -> registry -> InitService
+08.07    NEXT    minimal Base InitService task list and lifecycle acceptance
 ```
 
 M00-08.01 absorbed the originally separate minimal scheduler and task-syscall increments so the
@@ -225,9 +234,33 @@ three consecutive PASS runs) with quantitative evidence: the preemption counter 
 sleeper wake elapsed 20129/20106/20160 of 20000 requested ticks, below one task timeslice with the
 bound derived from the kernel-published `M00_08_SCHED_SLICES` constants (so both fixed task-slice
 and fixed idle-slice polling would fail). Pre-release stack pre-mapping holds constructively (the
-fixed-pool mapping loop precedes the hart release gate). Full M00-02..M00-08.02 local chain PASS;
-the milestone is not declared DONE until the GitHub Actions confirmation is recorded at
-integration.
+fixed-pool mapping loop precedes the hart release gate). Integrated to `main` as `de4df0e`
+(PR #26) with full RV64 QEMU regression CI run `32219284629` SUCCESS — milestone DONE.
+
+### M00-08.03 acceptance direction (first increment accepted locally)
+
+M00-08.03.01 froze the non-blocking subset of the research candidate
+(`docs/research/JIXIA_M00_08_03_IPC_ARCHITECTURE_CANDIDATE.md`); accepted ABI record:
+`docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`. Proven at least:
+
+```text
+send-before-recv persists; FIFO order within an endpoint
+full register ABI: 4 payload words per message, receiver-visible sender TaskId
+typed index+generation handles fail closed (malformed, stale, bit-63-set)
+generation capped at 0x7fffffff; ceiling retires a slot forever (no ABA wrap)
+EndpointManager constructed boot-hart-first before secondary hart release
+destroy is owner-only (-EACCES) and clears messages + bumps generation
+recreate isolates epochs (old alias -EINVAL, new handle live at +1 epoch) [C14b]
+try_recv on an empty endpoint returns -EAGAIN immediately, never blocks [C15]
+queue-full is -EAGAIN at depth 16 and recovers after a drain
+reserved blocking syscalls (9/10/12) fail closed with -ENOSYS
+no blocking state, no scheduler interaction, no dynamic memory anywhere
+all M00-02 through M00-08.02 regressions remain green
+```
+
+Blocking recv/call/reply, ReplyToken/Transact, task-exit IPC cleanup, capability
+tables, and registry routing remain open for later M00-08.03 increments — M00-08.03
+is not DONE.
 
 ## 7. NEXT — provider-backed pageable components
 
