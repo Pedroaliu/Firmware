@@ -1,5 +1,7 @@
 #include "microkernel/core/ipc_manager.h"
 
+#include "microkernel/verify/trace.h"
+
 namespace jixia::microkernel::ipc {
 
 EndpointManager::EndpointManager() : table_lock_(), slot_allocated_(), endpoints_() {
@@ -21,12 +23,17 @@ void EndpointManager::clear_queue(Endpoint& endpoint) {
 }
 
 intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_create_begin, 0U, owner, 0U, 0U);
     if (handle_out == nullptr) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_create_reject, operation, 0U, owner,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Lock order: table lock -> endpoint lock (never the reverse). */
     SpinlockGuard table_guard(table_lock_);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_create_table_locked, operation, 0U,
+                            verify::lock_endpoint_table);
     for (size_t index = 0U; index < kMaxEndpoints; ++index) {
         /* A retired slot is allocated forever: its epoch space is exhausted. */
         if (slot_allocated_[index] || endpoints_[index].retired) {
@@ -54,16 +61,26 @@ intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
             endpoint.generation = 1U;
         }
 
-        *handle_out = EndpointHandle{static_cast<uint32_t>(index), endpoint.generation}.raw();
+        const uint64_t handle =
+            EndpointHandle{static_cast<uint32_t>(index), endpoint.generation}.raw();
+        *handle_out = handle;
+        JIXIA_VERIFY_POINT(verify::Event::ipc_create_publish, operation, handle, owner,
+                           endpoint.generation, endpoint.count,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return 0;
     }
 
+    JIXIA_VERIFY_POINT(verify::Event::ipc_create_reject, operation, 0U, owner,
+                       static_cast<uint64_t>(kErrorNoSpace), 0U, verify::lock_endpoint_table);
     return kErrorNoSpace;
 }
 
 intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_destroy_begin, handle, caller, 0U, 0U);
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
@@ -71,13 +88,21 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
     SpinlockGuard table_guard(table_lock_);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_destroy_locked, operation, handle,
+                            verify::lock_endpoint_table | verify::lock_endpoint);
 
     if (!slot_allocated_[parsed.index] || !endpoint.active ||
         (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
     if (endpoint.owner != caller) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorAccess), endpoint.owner,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return kErrorAccess;
     }
 
@@ -99,24 +124,40 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
         endpoint.generation += 1U;
         slot_allocated_[parsed.index] = false;
     }
+    JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_dead, operation, handle, caller,
+                       endpoint.generation, endpoint.retired ? 1U : 0U,
+                       verify::lock_endpoint_table | verify::lock_endpoint);
     return 0;
 }
 
 intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4]) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_send_begin, handle, sender, words[0], 0U);
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Single endpoint lock only: no table, task, or time locks here. */
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_send_before_lock, operation, handle,
+                            verify::lock_none);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_send_locked, operation, handle,
+                            verify::lock_endpoint);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
     if (endpoint.count >= kEndpointQueueDepth) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorAgain), endpoint.count,
+                           verify::lock_endpoint);
         return kErrorAgain;
     }
 
@@ -127,24 +168,38 @@ intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&
     slot.words[2] = words[2];
     slot.words[3] = words[3];
     endpoint.count += 1U;
+    JIXIA_VERIFY_POINT(verify::Event::ipc_send_enqueue, operation, handle, sender, words[0],
+                       endpoint.count, verify::lock_endpoint);
     return 0;
 }
 
 intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_recv_begin, handle, 0U, 0U, 0U);
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed) || (message_out == nullptr)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Single endpoint lock only: no table, task, or time locks here. */
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_before_lock, operation, handle,
+                            verify::lock_none);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_locked, operation, handle,
+                            verify::lock_endpoint);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
     if (endpoint.count == 0U) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorAgain), 0U, verify::lock_endpoint);
         return kErrorAgain;
     }
 
@@ -158,6 +213,8 @@ intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
     endpoint.queue[endpoint.head] = {};
     endpoint.head = (endpoint.head + 1U) % kEndpointQueueDepth;
     endpoint.count -= 1U;
+    JIXIA_VERIFY_POINT(verify::Event::ipc_recv_dequeue, operation, handle, message_out->sender,
+                       message_out->words[0], endpoint.count, verify::lock_endpoint);
     return 0;
 }
 

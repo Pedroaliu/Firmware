@@ -12,6 +12,7 @@
 #include "microkernel/core/task_manager.h"
 #include "microkernel/core/time_manager.h"
 #include "microkernel/core/vmm_manager.h"
+#include "microkernel/verify/trace.h"
 
 namespace jixia::microkernel::task::syscall {
 namespace {
@@ -180,6 +181,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 
         if (initial_task && detached && return_value == JIXIA_M00_08_IPC_INIT_RESULT) {
             printk("M00_08_IPC_NONBLOCKING: PASS\n");
+            JIXIA_VERIFY_DUMP();
         }
 #endif
         break;

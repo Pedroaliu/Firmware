@@ -5,7 +5,7 @@
 
 #include "microkernel/core/singleton.h"
 #include "microkernel/core/spinlock.h"
-#include "microkernel/core/task.h"
+#include "microkernel/core/task_types.h"
 
 namespace jixia::microkernel::ipc {
 

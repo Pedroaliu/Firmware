@@ -5,6 +5,7 @@
 #include "microkernel/core/task.h"
 #include "microkernel/core/task_manager.h"
 #include "microkernel/core/time_manager.h"
+#include "microkernel/verify/trace.h"
 
 namespace jixia::microkernel::scheduler {
 
@@ -19,9 +20,17 @@ void RunQueue::reset() {
 }
 
 bool RunQueue::insert(task::Task& task) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::runqueue_insert_begin,
+                           reinterpret_cast<uintptr_t>(this), task.tid,
+                           static_cast<uint64_t>(task.state), task.queued ? 1U : 0U);
     SpinlockGuard guard(lock_);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::runqueue_insert_locked, operation,
+                            reinterpret_cast<uintptr_t>(this), verify::lock_runqueue);
 
     if (task.queued || task.delay.queued || task.state == task::TaskState::ended) {
+        JIXIA_VERIFY_POINT(verify::Event::runqueue_insert_reject, operation,
+                           reinterpret_cast<uintptr_t>(this), task.tid,
+                           static_cast<uint64_t>(task.state), size_, verify::lock_runqueue);
         return false;
     }
 
@@ -44,6 +53,9 @@ bool RunQueue::insert(task::Task& task) {
     task.state = task::TaskState::ready;
     task.queued = true;
     ++size_;
+    JIXIA_VERIFY_POINT(verify::Event::runqueue_insert_publish, operation,
+                       reinterpret_cast<uintptr_t>(this), task.tid,
+                       static_cast<uint64_t>(task.state), size_, verify::lock_runqueue);
     return true;
 }
 
@@ -54,6 +66,11 @@ task::Task* RunQueue::remove() {
     if (selected == nullptr) {
         return nullptr;
     }
+    JIXIA_VERIFY_LOCKED_OPERATION(
+        operation, verify::Event::runqueue_remove_begin, reinterpret_cast<uintptr_t>(this),
+        selected->tid, static_cast<uint64_t>(selected->state), size_, verify::lock_runqueue);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::runqueue_remove_locked, operation,
+                            reinterpret_cast<uintptr_t>(this), verify::lock_runqueue);
 
     head_ = selected->next;
     if (head_ != nullptr) {
@@ -66,6 +83,9 @@ task::Task* RunQueue::remove() {
     selected->next = nullptr;
     selected->queued = false;
     --size_;
+    JIXIA_VERIFY_POINT(verify::Event::runqueue_remove_select, operation,
+                       reinterpret_cast<uintptr_t>(this), selected->tid,
+                       static_cast<uint64_t>(selected->state), size_, verify::lock_runqueue);
 
     if (selected->state != task::TaskState::ready || selected->delay.queued) {
         hart::park();
