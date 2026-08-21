@@ -253,7 +253,7 @@ and fixed idle-slice polling would fail). Pre-release stack pre-mapping holds co
 fixed-pool mapping loop precedes the hart release gate). Integrated to `main` as `de4df0e`
 (PR #26) with full RV64 QEMU regression CI run `32219284629` SUCCESS — milestone DONE.
 
-### M00-08.03 acceptance direction (first increment accepted locally)
+### M00-08.03 acceptance direction (two increments accepted; third in review)
 
 M00-08.03.01 froze the non-blocking subset of the research candidate
 (`docs/research/JIXIA_M00_08_03_IPC_ARCHITECTURE_CANDIDATE.md`); accepted ABI record:
@@ -269,13 +269,19 @@ destroy is owner-only (-EACCES) and clears messages + bumps generation
 recreate isolates epochs (old alias -EINVAL, new handle live at +1 epoch) [C14b]
 try_recv on an empty endpoint returns -EAGAIN immediately, never blocks [C15]
 queue-full is -EAGAIN at depth 16 and recovers after a drain
-reserved blocking syscalls (9/10/12) fail closed with -ENOSYS
 no blocking state, no scheduler interaction, no dynamic memory anywhere
 all M00-02 through M00-08.02 regressions remain green
 ```
 
-Blocking recv/call/reply, ReplyToken/Transact, task-exit IPC cleanup, capability
-tables, and registry routing remain open for later M00-08.03 increments — M00-08.03
+M00-08.03.02 (DONE, squash `ba27c4c1a520`, PR #30, CI `32460452557`) added
+blocking recv: syscall 10 with multi-receiver FIFO wakeup, atomic
+block-under-endpoint-lock protocol, `-EIDRM` destroy wakes, membership
+refusals, and the dual-hart race determinism; accepted ABI record
+`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
+
+M00-08.03.03 (call/reply + ReplyToken) is drafted as ABI candidate (PR #32);
+task-exit IPC cleanup is split to M00-08.03.04. Capability tables and
+registry routing remain open for later M00-08.03 increments — M00-08.03
 is not DONE.
 
 ## 7. NEXT — provider-backed pageable components

@@ -425,7 +425,8 @@ supported now:
 
 not yet a real usr service:
     no named component registry/task_exec
-    non-blocking message IPC only (blocking/wakeup paths pending)
+    message IPC: non-blocking send/try_recv + blocking recv with FIFO wakeup
+      (call/reply + ReplyToken pending as M00-08.03.03 ABI candidate)
     no safe user-copy
     no protected per-service VSpace
 ```

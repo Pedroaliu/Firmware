@@ -289,7 +289,7 @@ avoids a live shared-page-table mutation before Jixia has a TLB-shootdown protoc
 
 ### Active M00-08.03 direction
 
-Increment 03.01 (implemented, local acceptance PASS) delivers the non-blocking substrate:
+M00-08.03.01 (DONE, `9c617ec`, PR #29) delivered the non-blocking substrate:
 
 ```text
 static endpoint table (16) + per-endpoint spinlock + depth-16 FIFO
@@ -302,10 +302,17 @@ full register ABI: 4 payload words + receiver-visible sender TaskId
 reserved numbers 9/10/12 (call/recv/reply) fail closed with -ENOSYS
 ```
 
-Accepted ABI record: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md` — it covers the research
-candidate's non-blocking leans (UNRESOLVED-1/2/3/7 as listed there); blocking recv, call/reply,
-ReplyToken/Transact, task-exit cleanup, and every other candidate UNRESOLVED item stay open for the
-next M00-08.03 increments.
+M00-08.03.02 (DONE, squash `ba27c4c1a520`, PR #30) added blocking recv +
+multi-receiver FIFO wakeup: syscall 10, atomic block-under-endpoint-lock
+protocol, `.03.02` membership refusals, `DESTROY_WOKE_ALL_EIDRM`-class
+acceptance; accepted ABI record `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
+
+M00-08.03.03 (call/reply + ReplyToken) is at the ABI-candidate stage:
+`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md` (CANDIDATE / FROZEN FOR
+REVIEW, PR #32) — 64-bit self-locating ReplyToken, per-endpoint 16-slot
+transaction table, single-endpoint-lock reply path, fail-closed task-exit
+boundary; full task-exit IPC cleanup is split to M00-08.03.04. Capability
+tables and registry routing remain open; M00-08.03 is not DONE.
 
 ---
 
