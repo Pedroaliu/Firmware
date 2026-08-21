@@ -170,9 +170,13 @@ The first external execution on commit `2563f14` established a green
 single-hart target baseline and completed the 2-hart/4-hart IPC workloads with
 full structured traces and zero dropped records. The original SMP wrapper then
 misclassified both runs because concurrent console characters corrupted exact
-legacy marker lines before the trace checker ran. This is test-harness and
-console evidence, not an observed IPC-history violation; the traces must be
-rechecked by the corrected wrapper before the SMP lanes are labelled green.
+legacy marker lines before the trace checker ran. The corrected checker later
+accepted both retained histories (`340` records on 2 harts and `354` records on
+4 harts), and fresh corrected-wrapper runs passed again (`340` records on both
+2 and 4 harts, all expected harts represented and zero records dropped).
+M00-08.03.01 SMP structured-history verification is therefore green for these
+named seeds and schedules; this is bounded stress/history evidence, not a
+general proof of all interleavings or starvation freedom.
 
 The same execution passed optimized and ASan/UBSan host torture, while the GCC
 TSan executable terminated with `SIGSEGV` before producing a TSan race report.
@@ -181,6 +185,12 @@ defect. The harness now records the compiler/platform, captures sanitizer
 stderr and preserves the failing status; `JIXIA_HOST_TSAN_CXX` permits a second
 runtime/compiler without weakening the mandatory lane. This is consistent
 with the existing M00-05 record of GCC TSan runtime failures on the Deepin host.
+The captured Deepin result identified GCC 12.3.0 on Linux 6.18.34 and failed in
+TSan initialization with `unexpected memory mapping`, before the torture body
+executed. On Linux, the host harness now uses `setarch --addr-no-randomize` when
+the per-process personality operation is available. This changes only the
+sanitized child process, not the host-wide ASLR sysctls; it can be disabled with
+`JIXIA_TSAN_DISABLE_ASLR=0` or required with `JIXIA_TSAN_DISABLE_ASLR=1`.
 
 ## 7. Test families to grow with every feature
 
