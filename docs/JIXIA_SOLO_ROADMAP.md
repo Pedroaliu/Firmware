@@ -183,10 +183,10 @@ M00-06/M00-07 S-mode contexts remain mechanism tests only.
                  + ready queues + idle + create/yield/end/wait/detach
 08.02    DONE    mtime preemption + sleep/wakeup + deadline-aware idle
 08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
-  .03.01 DONE*   non-blocking Endpoint/Message IPC (static table, typed
+  .03.01 DONE    non-blocking Endpoint/Message IPC (static table, typed
                  handles, send/try_recv; syscalls 6/7/8/11, 9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
-                 (* CI run ID recorded at integration)
+                 (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry / prebuilt component catalog
 08.06    NEXT    init_main bootstrap -> registry -> InitService

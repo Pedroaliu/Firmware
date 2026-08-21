@@ -230,11 +230,11 @@ Actual increment ledger:
                  + ready queues + idle + create/yield/end/wait/detach
 08.02    DONE    mtime preemption + sleep/wakeup + deadline-aware idle
 08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
-  .03.01 DONE*   non-blocking Endpoint/Message IPC: static 16-slot endpoint
+  .03.01 DONE    non-blocking Endpoint/Message IPC: static 16-slot endpoint
                  table, per-endpoint spinlock + depth-16 FIFO, typed
                  index+generation handles, syscalls 6/7/8/11 (9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
-                 (* CI run ID recorded at integration)
+                 (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
@@ -370,6 +370,19 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-21 — M00-08.03.01 integration recorded; increment flipped DONE
+
+- M00-08.03.01 integration evidence recorded: squash merge `9c617ec` (PR #29,
+  `9c617ec7070893086adda1ae33021987dffe513d`) with main-branch CI run
+  `32437093429` SUCCESS → `DONE*` flipped to `DONE` in the increment ledgers.
+- The squash includes the final PR #29 review round: the generation-ceiling
+  probe made hermetic (full-table snapshot before, restore on every exit path,
+  pass or fail; Spinlock objects never reset) and the user_task.S C14b
+  acceptance-comment relabel.
+- M00-08.03 stays ACTIVE: blocking recv/call/reply, ReplyToken/Transact,
+  blocked_message transitions, task-exit IPC cleanup, capabilities, and
+  registry routing remain open.
 
 ### 2026-08-20 — M00-08.02 closed DONE; M00-08.03 activated; M00-08.03.01 implemented
 

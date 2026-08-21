@@ -357,7 +357,7 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 
 M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
 at `e930a24`; M00-08.02 is DONE at `de4df0e` (CI run `32219284629`); M00-08.03 is ACTIVE with its
-first increment implemented.
+first increment M00-08.03.01 DONE at `9c617ec` (PR #29, CI run `32437093429`).
 
 Actual increment ledger:
 
@@ -366,14 +366,14 @@ Actual increment ledger:
                  + ready queues + idle + create/yield/end/wait/detach
 08.02    DONE    mtime preemption + sleep/wakeup + deadline-aware idle
 08.03    ACTIVE  message queue + blocking/wakeup IPC foundation
-  .03.01 DONE*   non-blocking Endpoint/Message IPC: static 16-slot endpoint
+  .03.01 DONE    non-blocking Endpoint/Message IPC: static 16-slot endpoint
                  table, per-endpoint spinlock + depth-16 FIFO, typed
                  index+generation handles (bit 63 clear, generation
                  1..0x7fffffff, ceiling retires the slot), boot-hart-first
                  EndpointManager construction, full 4-word + sender-TaskId
                  register ABI, syscalls 6/7/8/11 (9/10/12 reserved ->
                  -ENOSYS), local acceptance PASS
-                 (* CI evidence recorded at integration)
+                 (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
