@@ -83,21 +83,24 @@ it does not emit a conclusion that the checker blindly trusts.
 - no call, branch, counter, lock or structure field survives in production;
 - normal ABI and endpoint/scheduler semantics remain unchanged.
 
-With verification enabled, the kernel records fixed-size events into per-hart,
+With verification enabled, CMake emits a distinctly named `jixia-verify.elf` /
+`jixia-verify.bin` test image. The kernel records fixed-size events into per-hart,
 single-writer buffers. Records contain a global sequence, timestamp, hart,
 operation id, event, declared lockset, object, subject and two arguments. There
 is no allocation, `printk` or kernel lock acquisition in the recording path.
 The completed acceptance workload dumps records only after the measured
 operations; a Python checker reconstructs histories in global sequence order.
 
-The first vocabulary covers:
+The vocabulary covers:
 
-- endpoint create/destroy/send/try-receive begin, rejection and linearization;
+- endpoint create/destroy/send/blocking-receive/try-receive begin, rejection and
+  linearization;
+- waiter publication, FIFO wake, receive-result publication and later READY
+  publication;
 - run-queue insertion/removal begin, rejection and publication/selection;
 - task-current publication;
 - deterministic bounded delay at named test points;
-- reserved blocking-IPC points: waiter published, current task relinquished,
-  waiter popped, and READY publication.
+- waiter-popped and READY-publication perturbation points.
 
 Each linearization event declares the lockset that must be held. The checker
 fails closed on trace overflow, sequence gaps, duplicate operation completion,
@@ -109,9 +112,10 @@ membership and stale-handle success.
 ### 6.1 Independent small-state models
 
 `verification/model/ipc_model_check.py` exhaustively explores a deliberately
-small non-blocking endpoint state machine. It covers create, destroy, send,
-receive, bounded FIFO, generation advancement and permanent retirement at the
-generation ceiling.
+small endpoint state machine. It covers create, destroy, send, blocking receive,
+message FIFO, receiver FIFO, exactly-once wake, generation advancement and
+permanent retirement at the generation ceiling. Messages and waiters are never
+simultaneously pending, and a task cannot wait on two endpoints.
 
 `verification/model/scheduler_model_check.py` explores three tasks on two
 harts and checks exactly-one membership among READY/run queue,
@@ -133,12 +137,15 @@ refinement and scheduler starvation freedom are unproven.
 
 The harness is built in optimized, ASan/UBSan and optional TSan lanes. To make
 this possible without pretending that RISC-V task context is host code,
-`TaskId` and `EntryPoint` are factored into `task_types.h`; the endpoint manager
-no longer imports the complete architecture-dependent task structure.
+`TaskId` and `EntryPoint` are factored into `task_types.h`. A hosted compile-only
+Task surface and fail-closed stubs satisfy target context/scheduler references
+that only the blocking path needs; entering such a path aborts the host run.
+The host torture deliberately exercises the non-blocking production operations,
+while the actual blocking path is checked by the model and target QEMU trace.
 
 ### 6.3 Target trace and nightly runner
 
-The existing M00-08.03.01 QEMU acceptance entry accepts SMP count, TCG thread
+The M00-08.03.01 QEMU acceptance entry accepts SMP count, TCG thread
 mode, seed, jitter and trace size. Verification mode runs the offline checker.
 Single-hart acceptance retains the complete exact-marker and marker-order
 oracle. Multi-hart verification does not use concurrent `printk` records as a
@@ -163,6 +170,7 @@ The nightly runner combines:
 - small-state models;
 - high-volume host IPC torture with TSan;
 - QEMU MTTCG with 2 and 4 harts;
+- blocking-receive QEMU acceptance at 1 and 2 harts for every nightly seed;
 - a rotating seed matrix and deterministic hook perturbations;
 - complete logs and a run manifest retained as artifacts.
 
@@ -252,7 +260,29 @@ measurements can expose bad behavior but cannot upgrade that contract. If
 bounded waiting becomes required, use and prove a standard ticket/MCS-style
 primitive under the project's interrupt and RISC-V memory-model assumptions.
 
-## 9. Open scheduler proof obligation found by this work
+## 9. Hostboot-derived production/test boundary
+
+The pinned Hostboot tree does not turn its normal boot image into a benchmark
+runner. Its build/test flow creates a separate `hbicore_test.bin`, distributes
+test modules with `hbDistribute --test`, launches them through CxxTest, and
+drives the resulting image under simulation with external watchdog, FFDC and
+coverage collection (`src/build/citest/build-script`, `cxxtest-start.sh`,
+`autocitest`, `src/usr/cxxtest/cxxtestexec.C`, and `src/makefile`).
+
+Jixia adopts that boundary:
+
+- `jixia.bin` is the production artifact and contains no verification trace or
+  jitter machinery;
+- `jixia-verify.bin` is the test image and is never a deployable production
+  artifact;
+- models, history checkers, mutation tests, sanitizer harnesses and nightly
+  orchestration remain hosted under `verification/` and `scripts/`;
+- both images compile the same IPC state-transition implementation, so the test
+  suite does not validate a replacement queue;
+- verification needs do not add output parameters or counters to production IPC
+  interfaces.
+
+## 10. Open scheduler proof obligation found by this work
 
 The present yield/preemption sequence calls `return_runnable()` before
 `set_next_runnable()`. The first call can publish the old current task as READY
@@ -274,7 +304,7 @@ models:
 This document does not silently alter production scheduling. Reserved trace
 points make the transition observable in the next scheduler/IPC increment.
 
-## 10. seL4-inspired formal path
+## 11. seL4-inspired formal path
 
 Jixia should copy seL4's discipline, not claim seL4's assurance level. The
 useful staged structure is:
@@ -304,7 +334,7 @@ for assumptions, unverified code and integration. References:
 - <https://docs.sel4.systems/projects/sel4/verified-configurations.html>
 - <https://docs.sel4.systems/projects/sel4test/>
 
-## 11. Immediate acceptance boundary
+## 12. Immediate acceptance boundary
 
 This verification foundation is acceptable for review when:
 

@@ -9,7 +9,7 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE (`de4df0e`, PR #26; CI run `32219284629`)
-- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; first increment M00-08.03.01 (non-blocking Endpoint/Message IPC) implemented with local acceptance PASS
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE, M00-08.03.02 (blocking recv + FIFO wakeup) implemented with local acceptance PASS — integration PR pending
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
@@ -357,7 +357,9 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 
 M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
 at `e930a24`; M00-08.02 is DONE at `de4df0e` (CI run `32219284629`); M00-08.03 is ACTIVE with its
-first increment M00-08.03.01 DONE at `9c617ec` (PR #29, CI run `32437093429`).
+first increment M00-08.03.01 DONE at `9c617ec` (PR #29, CI run `32437093429`) and its second
+increment M00-08.03.02 (blocking recv + FIFO wakeup) implemented on
+`agent/m00-08-03-02-ipc-blocking-recv` — integration PR pending.
 
 Actual increment ledger:
 
@@ -374,6 +376,12 @@ Actual increment ledger:
                  register ABI, syscalls 6/7/8/11 (9/10/12 reserved ->
                  -ENOSYS), local acceptance PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
+  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stay -ENOSYS), per-task MessageWaitNode,
+                 per-endpoint waiting FIFO, atomic block/wake/destroy under
+                 ep.lock, -EIDRM destroy wake; smp1 deterministic + smp2
+                 cross-hart acceptance PASS x3
+                 (* squash/CI evidence recorded at integration; PR pending)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
@@ -383,6 +391,12 @@ Actual increment ledger:
 Accepted M00-08.03.01 ABI record: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`
 (covers the research candidate's non-blocking leans; blocking IPC, ReplyToken,
 and task-exit cleanup remain open for later M00-08.03 increments).
+
+Frozen-for-implementation M00-08.03.02 ABI record:
+`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (blocking recv syscall 10,
+multi-receiver FIFO wakeup, -EIDRM destroy wake, atomic block/wake protocols;
+call/reply, ReplyToken, timeouts, cancel, capabilities, registry routing, and
+task-exit IPC cleanup remain out of scope).
 
 M00-08.02 translated Hostboot's decrementer and delay-list policy to RISC-V `mtime`: save the
 interrupted U task, release expired sleepers, select local/global/idle work, restore the selected

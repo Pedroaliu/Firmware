@@ -27,7 +27,12 @@ bool RunQueue::insert(task::Task& task) {
     JIXIA_VERIFY_TEST_POINT(verify::TestPoint::runqueue_insert_locked, operation,
                             reinterpret_cast<uintptr_t>(this), verify::lock_runqueue);
 
-    if (task.queued || task.delay.queued || task.state == task::TaskState::ended) {
+    /*
+     * M00-08.03.02: a task queued in an endpoint waiting FIFO is blocked and
+     * must never enter a run queue; the FIFO unlink happens before add_task.
+     */
+    if (task.queued || task.delay.queued || task.message_wait.queued ||
+        task.state == task::TaskState::ended) {
         JIXIA_VERIFY_POINT(verify::Event::runqueue_insert_reject, operation,
                            reinterpret_cast<uintptr_t>(this), task.tid,
                            static_cast<uint64_t>(task.state), size_, verify::lock_runqueue);
@@ -87,7 +92,8 @@ task::Task* RunQueue::remove() {
                        reinterpret_cast<uintptr_t>(this), selected->tid,
                        static_cast<uint64_t>(selected->state), size_, verify::lock_runqueue);
 
-    if (selected->state != task::TaskState::ready || selected->delay.queued) {
+    if (selected->state != task::TaskState::ready || selected->delay.queued ||
+        selected->message_wait.queued) {
         hart::park();
     }
     return selected;
@@ -125,9 +131,12 @@ bool Scheduler::add_task(task::Task& task) {
      * Every RunQueue::insert failure condition is checked before the READY
      * transition. Insert can then only fail on a concurrent-insert race, and
      * in that case it returns without mutating the task (fail-closed).
+     * message_wait.queued (M00-08.03.02): a blocked receiver is unlinked from
+     * its endpoint waiting FIFO before any add_task, so this only fires on a
+     * broken invariant; callers such as IPC wake treat it as fail-closed.
      */
     if (task.state == task::TaskState::ended || task.idle || task.cpu == nullptr ||
-        task.delay.queued || task.queued) {
+        task.delay.queued || task.queued || task.message_wait.queued) {
         return false;
     }
 

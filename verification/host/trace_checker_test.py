@@ -41,12 +41,60 @@ VALID_RECORDS = [
     "object=4294967296 subject=1 arg0=2 arg1=0",
 ]
 
+VALID_BLOCKING_RECORDS = [
+    "seq=1 time=1 hart=0 op=1 event=ipc_create_begin lockset=0 "
+    "object=0 subject=1 arg0=0 arg1=0",
+    "seq=2 time=2 hart=0 op=1 event=ipc_create_publish lockset=3 "
+    "object=4294967296 subject=1 arg0=1 arg1=0",
+    "seq=3 time=3 hart=0 op=3 event=ipc_recv_begin lockset=0 "
+    "object=4294967296 subject=9 arg0=0 arg1=0",
+    "seq=4 time=4 hart=0 op=3 event=ipc_recv_wait_enqueue lockset=2 "
+    "object=4294967296 subject=9 arg0=77 arg1=1",
+    "seq=5 time=5 hart=1 op=5 event=ipc_send_begin lockset=0 "
+    "object=4294967296 subject=2 arg0=34 arg1=0",
+    "seq=6 time=6 hart=1 op=5 event=ipc_send_wake lockset=2 "
+    "object=4294967296 subject=9 arg0=34 arg1=0",
+    "seq=7 time=7 hart=1 op=5 event=ipc_recv_result_publish lockset=2 "
+    "object=4294967296 subject=9 arg0=0 arg1=2",
+    "seq=8 time=8 hart=1 op=8 event=runqueue_insert_begin lockset=0 "
+    "object=170 subject=9 arg0=77 arg1=0",
+    "seq=9 time=9 hart=1 op=8 event=runqueue_insert_publish lockset=8 "
+    "object=170 subject=9 arg0=114 arg1=1",
+    "seq=10 time=10 hart=0 op=10 event=ipc_destroy_begin lockset=0 "
+    "object=4294967296 subject=1 arg0=0 arg1=0",
+    "seq=11 time=11 hart=0 op=10 event=ipc_destroy_dead lockset=3 "
+    "object=4294967296 subject=1 arg0=2 arg1=0",
+]
+
+VALID_DESTROY_BLOCKING_RECORDS = [
+    "seq=1 time=1 hart=0 op=1 event=ipc_create_begin lockset=0 "
+    "object=0 subject=1 arg0=0 arg1=0",
+    "seq=2 time=2 hart=0 op=1 event=ipc_create_publish lockset=3 "
+    "object=4294967296 subject=1 arg0=1 arg1=0",
+    "seq=3 time=3 hart=1 op=3 event=ipc_recv_begin lockset=0 "
+    "object=4294967296 subject=9 arg0=0 arg1=0",
+    "seq=4 time=4 hart=1 op=3 event=ipc_recv_wait_enqueue lockset=2 "
+    "object=4294967296 subject=9 arg0=77 arg1=1",
+    "seq=5 time=5 hart=0 op=5 event=ipc_destroy_begin lockset=0 "
+    "object=4294967296 subject=1 arg0=0 arg1=0",
+    "seq=6 time=6 hart=0 op=5 event=ipc_destroy_dead lockset=3 "
+    "object=4294967296 subject=1 arg0=2 arg1=0",
+    "seq=7 time=7 hart=0 op=5 event=ipc_destroy_wake lockset=3 "
+    "object=4294967296 subject=9 arg0=18446744073709551573 arg1=0",
+    "seq=8 time=8 hart=0 op=5 event=ipc_recv_result_publish lockset=3 "
+    "object=4294967296 subject=9 arg0=18446744073709551573 arg1=0",
+    "seq=9 time=9 hart=0 op=9 event=runqueue_insert_begin lockset=0 "
+    "object=170 subject=9 arg0=77 arg1=0",
+    "seq=10 time=10 hart=0 op=9 event=runqueue_insert_publish lockset=8 "
+    "object=170 subject=9 arg0=114 arg1=1",
+]
+
 
 def render(records: list[str], dropped: int = 0) -> str:
     lines = ["JIXIA_VERIFY_TRACE_BEGIN: seed=1 records_per_hart=64"]
     lines.extend(f"JIXIA_VERIFY_TRACE: {record}" for record in records)
-    lines.append(f"JIXIA_VERIFY_TRACE_HART: hart=0 records=12 dropped={dropped}")
-    lines.append("JIXIA_VERIFY_TRACE_END: sequence=12")
+    lines.append(f"JIXIA_VERIFY_TRACE_HART: hart=0 records={len(records)} dropped={dropped}")
+    lines.append(f"JIXIA_VERIFY_TRACE_END: sequence={len(records)}")
     return "\n".join(lines) + "\n"
 
 
@@ -103,7 +151,31 @@ def main() -> int:
     duplicate_terminal[5] = duplicate_terminal[5].replace("op=5", "op=3", 1)
     run_case("duplicate-terminal", render(duplicate_terminal), False)
 
-    print("JIXIA_VERIFY_TRACE_CHECKER_SELFTEST: PASS cases=8 mutations=7")
+    blocking_args = [
+        "--expected-harts",
+        "2",
+        "--require-blocking-ipc",
+        "--require-cross-hart-wake",
+    ]
+    run_case("blocking-valid", render(VALID_BLOCKING_RECORDS), True, blocking_args)
+    run_case("blocking-destroy-valid", render(VALID_DESTROY_BLOCKING_RECORDS), True, blocking_args)
+
+    wrong_waiter = replace(VALID_BLOCKING_RECORDS, 5, "subject=9", "subject=8")
+    run_case("blocking-waiter-fifo", render(wrong_waiter), False, blocking_args)
+
+    ready_before_result = replace(VALID_BLOCKING_RECORDS, 6, "seq=7", "seq=9")
+    ready_before_result = replace(ready_before_result, 8, "seq=9", "seq=7")
+    run_case("blocking-result-before-ready", render(ready_before_result), False, blocking_args)
+
+    wrong_destroy_result = replace(
+        VALID_DESTROY_BLOCKING_RECORDS, 6, "arg0=18446744073709551573", "arg0=0"
+    )
+    run_case("blocking-destroy-eidrm", render(wrong_destroy_result), False, blocking_args)
+
+    wrong_result_sender = replace(VALID_BLOCKING_RECORDS, 6, "arg1=2", "arg1=3")
+    run_case("blocking-result-sender", render(wrong_result_sender), False, blocking_args)
+
+    print("JIXIA_VERIFY_TRACE_CHECKER_SELFTEST: PASS cases=14 mutations=11")
     return 0
 
 

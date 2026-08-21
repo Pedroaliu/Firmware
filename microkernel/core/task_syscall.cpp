@@ -67,6 +67,21 @@ uint64_t g_ipc_last_destroyed_handle = 0U;
 uint64_t g_ipc_full_handle = 0U;
 #endif
 
+#ifdef JIXIA_M00_08_03_02_PROBE
+bool g_ipc_c02_child_reported = false;
+bool g_ipc_c05_r1_reported = false;
+bool g_ipc_c05_r2_reported = false;
+bool g_ipc_c05_no_phantom_reported = false;
+bool g_ipc_c12_stale_reported = false;
+bool g_ipc_c12_child_reported = false;
+bool g_ipc_c13a_child_reported = false;
+bool g_ipc_c19_sender_reported = false;
+bool g_ipc_c19_receiver_reported = false;
+bool g_ipc_c19_drained_reported = false;
+bool g_ipc_reserved_02_reported = false;
+uint64_t g_ipc02_last_destroyed_handle = 0U;
+#endif
+
 [[nodiscard]] uintptr_t error_value(intptr_t error) {
     return static_cast<uintptr_t>(error);
 }
@@ -184,6 +199,50 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             JIXIA_VERIFY_DUMP();
         }
 #endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        if ((return_value == JIXIA_M00_08_IPC_C02_CHILD_RESULT) && !g_ipc_c02_child_reported) {
+            printk("M00_08_IPC_C02_WOKE_DELIVERED: PASS\n");
+            g_ipc_c02_child_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C05_R1_CHILD_RESULT) && !g_ipc_c05_r1_reported) {
+            printk("M00_08_IPC_C05_M1_TO_R1: PASS\n");
+            g_ipc_c05_r1_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C05_R2_CHILD_RESULT) && !g_ipc_c05_r2_reported) {
+            printk("M00_08_IPC_C05_M2_TO_R2: PASS\n");
+            g_ipc_c05_r2_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C12_CHILD_RESULT) && !g_ipc_c12_child_reported) {
+            printk("M00_08_IPC_C12_EIDRM: PASS\n");
+            g_ipc_c12_child_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C13A_CHILD_RESULT) && !g_ipc_c13a_child_reported) {
+            printk("M00_08_IPC_C13A_RESUMED: PASS\n");
+            g_ipc_c13a_child_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C19_SENDER_CHILD_RESULT) &&
+            !g_ipc_c19_sender_reported) {
+            printk("M00_08_IPC_C19_SENDER_DONE: PASS\n");
+            g_ipc_c19_sender_reported = true;
+        }
+
+        if ((return_value == JIXIA_M00_08_IPC_C19_RECEIVER_CHILD_RESULT) &&
+            !g_ipc_c19_receiver_reported) {
+            printk("M00_08_IPC_C19_RECEIVER_DONE: PASS\n");
+            g_ipc_c19_receiver_reported = true;
+        }
+
+        if (initial_task && detached && return_value == JIXIA_M00_08_IPC_BLOCKING_INIT_RESULT) {
+            printk("M00_08_IPC_BLOCKING_RECV: PASS\n");
+            JIXIA_VERIFY_DUMP();
+        }
+#endif
         break;
     }
 
@@ -286,6 +345,12 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             g_ipc_nonowner_reported = true;
         }
 #endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        if (result == 0) {
+            g_ipc02_last_destroyed_handle = handle;
+        }
+#endif
         break;
     }
 
@@ -297,8 +362,17 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             caller->context.x[13],
             caller->context.x[14],
         };
+        /* send never blocks: the caller stays current and safe to touch. */
         const intptr_t result = ipc::EndpointManager::instance().send(caller->tid, handle, words);
         caller->context.x[10] = (result < 0) ? error_value(result) : 0U;
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        if ((result == ipc::kErrorInvalidArgument) && (handle == g_ipc02_last_destroyed_handle) &&
+            !g_ipc_c12_stale_reported) {
+            printk("M00_08_IPC_C12_STALE_HANDLE: PASS\n");
+            g_ipc_c12_stale_reported = true;
+        }
+#endif
 
 #ifdef JIXIA_M00_08_03_01_PROBE
         if (result == 0) {
@@ -437,15 +511,56 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             }
         }
 #endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        /*
+         * C05 exactly-once evidence: after both receivers were woken, a third
+         * send must pend — no phantom waiter consumed it.
+         */
+        if ((result == 0) && (message.words[0] == JIXIA_M00_08_IPC_WORD_C05_M3) &&
+            !g_ipc_c05_no_phantom_reported) {
+            printk("M00_08_IPC_C05_THIRD_PENDING: PASS\n");
+            g_ipc_c05_no_phantom_reported = true;
+        }
+
+        /*
+         * C19 drained evidence: after the stress rounds the endpoint has no
+         * pending message and no waiter, so try_recv returns -EAGAIN. This is
+         * the only empty try_recv of the .03.02 workload.
+         */
+        if ((result == ipc::kErrorAgain) && !g_ipc_c19_drained_reported) {
+            printk("M00_08_IPC_C19_DRAINED_EAGAIN: PASS\n");
+            g_ipc_c19_drained_reported = true;
+        }
+#endif
+        break;
+    }
+
+    case JIXIA_TASK_SYSCALL_RECV: {
+        /*
+         * M00-08.03.02 blocking receive. Probe values are captured BEFORE the
+         * call: once recv() reports blocked, this hart's current_task is
+         * already switched and the old caller may run (or even end) on
+         * another hart, so the old Task/Context must not be touched again on
+         * that path. The endpoint layer writes a0..a5 into the caller's saved
+         * registers itself on the delivered/rejected paths.
+         */
+        const uint64_t handle = caller->context.x[10];
+        const ipc::RecvResult result = ipc::EndpointManager::instance().recv(*caller, handle);
+
+        if (result.status == ipc::RecvStatus::blocked) {
+            /* The trap frame must be reloaded from the newly selected task. */
+            rescheduled = true;
+        }
+        /* delivered/rejected: recv() already wrote the caller's a0..a5. */
         break;
     }
 
     case JIXIA_TASK_SYSCALL_CALL:
-    case JIXIA_TASK_SYSCALL_RECV:
     case JIXIA_TASK_SYSCALL_REPLY:
         /*
-         * Numbers 9, 10, and 12 are frozen by the M00-08.03 ABI but reserved:
-         * blocking call/reply IPC lands in later increments. Fail closed with
+         * Numbers 9 and 12 remain frozen reserved by the M00-08.03 ABI:
+         * blocking call/reply lands in later increments. Fail closed with
          * -ENOSYS instead of the crash path taken for undefined numbers.
          */
         caller->context.x[10] = error_value(kErrorNoSyscall);
@@ -454,6 +569,13 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
         if (!g_ipc_reserved_reported) {
             printk("M00_08_IPC_RESERVED_ENOSYS: PASS\n");
             g_ipc_reserved_reported = true;
+        }
+#endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        if (!g_ipc_reserved_02_reported) {
+            printk("M00_08_IPC_CALL_REPLY_ENOSYS: PASS\n");
+            g_ipc_reserved_02_reported = true;
         }
 #endif
         break;

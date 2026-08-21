@@ -138,6 +138,7 @@ Task* TaskManager::create_task_locked(EntryPoint entry, uintptr_t argument,
     task->queued = false;
     task->previous = nullptr;
     task->next = nullptr;
+    task->message_wait = {};
 
     initialize_user(task->context, entry, argument, stack_top,
                     reinterpret_cast<uintptr_t>(jixia_user_task_end_stub),
@@ -186,7 +187,13 @@ void TaskManager::release_task_locked(Task& task) {
         fail_closed();
     }
 
-    if (task.queued || task.delay.queued) {
+    /*
+     * M00-08.03.02: a task still queued in an endpoint waiting FIFO must never be
+     * freed — the FIFO holds raw Task pointers, so releasing the slot here would
+     * be a silent use-after-free. Full task-exit IPC cleanup is a later
+     * increment; refusing (parking) is the fail-closed behavior for now.
+     */
+    if (task.queued || task.delay.queued || task.message_wait.queued) {
         fail_closed();
     }
 
@@ -384,7 +391,9 @@ Task* TaskManager::get_current_task() {
 }
 
 void TaskManager::set_current_task(Task& task) {
-    if (task.state == TaskState::ended || task.queued || task.delay.queued) {
+    /* message_wait.queued: a blocked receiver is in no run queue (M00-08.03.02). */
+    if (task.state == TaskState::ended || task.queued || task.delay.queued ||
+        task.message_wait.queued) {
         fail_closed();
     }
 

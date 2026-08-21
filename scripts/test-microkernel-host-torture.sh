@@ -36,14 +36,27 @@ readonly COMMON_FLAGS=(
     -Wall
     -Wextra
     -Werror
+    -DJIXIA_HOST_IPC_TORTURE=1
     -I"${ROOT_DIR}"
 )
+
+readonly HOST_SOURCES=(
+    "${ROOT_DIR}/verification/host/ipc_torture.cpp"
+    "${ROOT_DIR}/verification/host/ipc_kernel_stubs.cpp"
+    "${ROOT_DIR}/microkernel/core/ipc_manager.cpp"
+)
+
+# Recreate linker outputs so a copied/restored build directory cannot retain a
+# non-executable mode bit and turn a valid host binary into a false test failure.
+rm -f \
+    "${BUILD_DIR}/ipc_torture" \
+    "${BUILD_DIR}/ipc_torture_asan" \
+    "${BUILD_DIR}/ipc_torture_tsan"
 
 "${HOST_CXX}" \
     "${COMMON_FLAGS[@]}" \
     -O2 \
-    "${ROOT_DIR}/verification/host/ipc_torture.cpp" \
-    "${ROOT_DIR}/microkernel/core/ipc_manager.cpp" \
+    "${HOST_SOURCES[@]}" \
     -o "${BUILD_DIR}/ipc_torture"
 
 "${HOST_CXX}" \
@@ -52,8 +65,7 @@ readonly COMMON_FLAGS=(
     -g \
     -fno-omit-frame-pointer \
     -fsanitize=address,undefined \
-    "${ROOT_DIR}/verification/host/ipc_torture.cpp" \
-    "${ROOT_DIR}/microkernel/core/ipc_manager.cpp" \
+    "${HOST_SOURCES[@]}" \
     -o "${BUILD_DIR}/ipc_torture_asan"
 
 read -r -a seeds <<<"${SEED_TEXT}"
@@ -79,8 +91,7 @@ if [[ "${JIXIA_HOST_TSAN:-0}" == "1" ]]; then
         -g \
         -fno-omit-frame-pointer \
         -fsanitize=thread \
-        "${ROOT_DIR}/verification/host/ipc_torture.cpp" \
-        "${ROOT_DIR}/microkernel/core/ipc_manager.cpp" \
+        "${HOST_SOURCES[@]}" \
         -o "${BUILD_DIR}/ipc_torture_tsan"
 
     tsan_runner=()

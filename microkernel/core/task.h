@@ -46,6 +46,18 @@ struct WaitInfo {
     uintptr_t return_value_address;
 };
 
+/*
+ * M00-08.03.02: membership of a task in at most one endpoint waiting FIFO while
+ * blocked in ipc_recv. Deliberately independent of the runqueue previous/next
+ * links and of DelayNode so message waiting can never alias scheduler or timer
+ * queue state. Guarded by the owning endpoint's lock.
+ */
+struct MessageWaitNode {
+    Task* previous;
+    Task* next;
+    bool queued;
+};
+
 struct TaskTracker {
     TaskTracker* parent;
     TaskTracker* first_child;
@@ -75,6 +87,9 @@ struct Task {
 
     /* Per-hart TimeManager queue state, mirroring Hostboot's delay_node. */
     DelayNode delay;
+
+    /* Endpoint waiting-FIFO membership while blocked in ipc_recv (M00-08.03.02). */
+    MessageWaitNode message_wait;
 
     uintptr_t stack_bottom;
     uintptr_t stack_top;

@@ -18,8 +18,8 @@ HART_PREFIX = "JIXIA_VERIFY_TRACE_HART: "
 BEGIN_TO_TERMINALS = {
     "ipc_create_begin": {"ipc_create_publish", "ipc_create_reject"},
     "ipc_destroy_begin": {"ipc_destroy_dead", "ipc_destroy_reject"},
-    "ipc_send_begin": {"ipc_send_enqueue", "ipc_send_reject"},
-    "ipc_recv_begin": {"ipc_recv_dequeue", "ipc_recv_reject"},
+    "ipc_send_begin": {"ipc_send_enqueue", "ipc_send_wake", "ipc_send_reject"},
+    "ipc_recv_begin": {"ipc_recv_dequeue", "ipc_recv_wait_enqueue", "ipc_recv_reject"},
     "runqueue_insert_begin": {"runqueue_insert_publish", "runqueue_insert_reject"},
     "runqueue_remove_begin": {"runqueue_remove_select", "runqueue_remove_empty"},
 }
@@ -27,8 +27,11 @@ BEGIN_TO_TERMINALS = {
 LINEARIZATION_LOCKSETS = {
     "ipc_create_publish": 0x3,
     "ipc_destroy_dead": 0x3,
+    "ipc_destroy_wake": 0x3,
     "ipc_send_enqueue": 0x2,
+    "ipc_send_wake": 0x2,
     "ipc_recv_dequeue": 0x2,
+    "ipc_recv_wait_enqueue": 0x2,
     "runqueue_insert_publish": 0x8,
     "runqueue_remove_select": 0x8,
 }
@@ -149,36 +152,141 @@ def check_operations(records: list[Record]) -> None:
         require(operation in begins, f"terminal without begin: op={operation}")
 
 
-def check_ipc_fifo(records: list[Record]) -> None:
-    queues: dict[int, collections.deque[tuple[int, int]]] = {}
-    dead_handles: set[int] = set()
+@dataclass
+class EndpointState:
+    messages: collections.deque[tuple[int, int]]
+    waiters: collections.deque[tuple[int, int]]
+    dead: bool = False
+
+
+def check_ipc(records: list[Record], require_blocking: bool, require_cross_hart: bool) -> None:
+    endpoints: dict[int, EndpointState] = {}
+    waiting_tasks: set[int] = set()
+    # tid -> (wake sequence, wake hart, operation, handle, result a0, sender a5)
+    pending_wakes: dict[int, tuple[int, int, int, int, int, int]] = {}
+    result_published: dict[int, int] = {}
+    send_begins: dict[int, tuple[int, int]] = {}
+    block_harts: set[int] = set()
+    wake_harts: set[int] = set()
+    cross_hart_wakes = 0
 
     for record in records:
         if record.event == "ipc_create_publish":
-            require(record.object not in queues, f"handle published twice: {record.object:#x}")
-            queues[record.object] = collections.deque()
+            require(record.object not in endpoints, f"handle published twice: {record.object:#x}")
+            endpoints[record.object] = EndpointState(collections.deque(), collections.deque())
         elif record.event == "ipc_destroy_dead":
-            require(record.object in queues, f"destroy of unpublished handle: {record.object:#x}")
-            queues[record.object].clear()
-            dead_handles.add(record.object)
+            require(record.object in endpoints, f"destroy of unpublished handle: {record.object:#x}")
+            endpoint = endpoints[record.object]
+            require(not endpoint.dead, f"handle destroyed twice: {record.object:#x}")
+            endpoint.messages.clear()
+            endpoint.dead = True
         elif record.event == "ipc_send_enqueue":
-            require(record.object in queues, f"enqueue to unpublished handle: {record.object:#x}")
-            require(record.object not in dead_handles, f"enqueue after destroy: {record.object:#x}")
-            queue = queues[record.object]
-            queue.append((record.subject, record.arg0))
-            require(record.arg1 == len(queue), f"enqueue count mismatch: {record}")
-            require(len(queue) <= 16, f"queue depth exceeded: {record.object:#x}")
+            require(record.object in endpoints, f"enqueue to unpublished handle: {record.object:#x}")
+            endpoint = endpoints[record.object]
+            require(not endpoint.dead, f"enqueue after destroy: {record.object:#x}")
+            require(not endpoint.waiters, f"message enqueued while waiters exist: {record.object:#x}")
+            endpoint.messages.append((record.subject, record.arg0))
+            require(record.arg1 == len(endpoint.messages), f"enqueue count mismatch: {record}")
+            require(len(endpoint.messages) <= 16, f"queue depth exceeded: {record.object:#x}")
+        elif record.event == "ipc_send_begin":
+            send_begins[record.op] = (record.subject, record.arg0)
         elif record.event == "ipc_recv_dequeue":
-            require(record.object in queues, f"dequeue from unpublished handle: {record.object:#x}")
-            require(record.object not in dead_handles, f"dequeue after destroy: {record.object:#x}")
-            queue = queues[record.object]
-            require(bool(queue), f"dequeue from empty model queue: {record.object:#x}")
-            expected = queue.popleft()
+            require(record.object in endpoints, f"dequeue from unpublished handle: {record.object:#x}")
+            endpoint = endpoints[record.object]
+            require(not endpoint.dead, f"dequeue after destroy: {record.object:#x}")
+            require(bool(endpoint.messages), f"dequeue from empty model queue: {record.object:#x}")
+            require(not endpoint.waiters, f"dequeue while waiters exist: {record.object:#x}")
+            expected = endpoint.messages.popleft()
             require(
                 expected == (record.subject, record.arg0),
                 f"FIFO mismatch: expected={expected} observed={(record.subject, record.arg0)}",
             )
-            require(record.arg1 == len(queue), f"dequeue count mismatch: {record}")
+            require(record.arg1 == len(endpoint.messages), f"dequeue count mismatch: {record}")
+        elif record.event == "ipc_recv_wait_enqueue":
+            require(record.object in endpoints, f"wait on unpublished handle: {record.object:#x}")
+            endpoint = endpoints[record.object]
+            require(not endpoint.dead, f"wait after destroy: {record.object:#x}")
+            require(not endpoint.messages, f"receiver blocked with pending message: {record.object:#x}")
+            require(record.subject not in waiting_tasks, f"task waits twice: tid={record.subject}")
+            require(record.arg0 == ord("M"), f"waiter published in wrong state: {record}")
+            endpoint.waiters.append((record.subject, record.hart))
+            waiting_tasks.add(record.subject)
+            block_harts.add(record.hart)
+            require(record.arg1 == len(endpoint.waiters), f"waiter count mismatch: {record}")
+        elif record.event in {"ipc_send_wake", "ipc_destroy_wake"}:
+            require(record.object in endpoints, f"wake on unpublished handle: {record.object:#x}")
+            endpoint = endpoints[record.object]
+            if record.event == "ipc_send_wake":
+                require(not endpoint.dead, f"send wake after destroy: {record.object:#x}")
+                require(not endpoint.messages, f"send wake with pending message: {record.object:#x}")
+                require(record.op in send_begins, f"send wake without send begin: op={record.op}")
+                sender, first_word = send_begins[record.op]
+                require(record.arg0 == first_word, f"send wake payload mismatch: {record}")
+                result_a0 = 0
+                result_sender = sender
+            else:
+                require(endpoint.dead, f"destroy wake before DEAD publication: {record.object:#x}")
+                require(not endpoint.messages, f"destroy wake with pending message: {record.object:#x}")
+                result_a0 = (1 << 64) - 43
+                result_sender = 0
+                require(record.arg0 == result_a0, f"destroy wake must return -EIDRM: {record}")
+            require(bool(endpoint.waiters), f"wake from empty waiter FIFO: {record.object:#x}")
+            expected_tid, block_hart = endpoint.waiters.popleft()
+            require(expected_tid == record.subject, f"waiter FIFO mismatch: {record}")
+            require(record.subject in waiting_tasks, f"waiter membership lost: tid={record.subject}")
+            waiting_tasks.remove(record.subject)
+            require(record.subject not in pending_wakes, f"task woken twice: tid={record.subject}")
+            pending_wakes[record.subject] = (
+                record.seq,
+                record.hart,
+                record.op,
+                record.object,
+                result_a0,
+                result_sender,
+            )
+            wake_harts.add(record.hart)
+            if block_hart != record.hart:
+                cross_hart_wakes += 1
+            require(record.arg1 == len(endpoint.waiters), f"wake count mismatch: {record}")
+        elif record.event == "ipc_recv_result_publish":
+            require(
+                record.lockset in {0x2, 0x3},
+                f"wrong lockset for receive result publication: {record.lockset:#x}",
+            )
+            require(record.subject in pending_wakes, f"result without wake: tid={record.subject}")
+            wake_seq, _, wake_op, wake_handle, result_a0, result_sender = pending_wakes[
+                record.subject
+            ]
+            require(wake_seq < record.seq, f"result precedes wake: tid={record.subject}")
+            require(record.op == wake_op, f"result operation differs from wake: {record}")
+            require(record.object == wake_handle, f"result handle differs from wake: {record}")
+            require(record.arg0 == result_a0, f"receive result a0 mismatch: {record}")
+            require(record.arg1 == result_sender, f"receive result sender mismatch: {record}")
+            require(record.subject not in result_published, f"result published twice: tid={record.subject}")
+            result_published[record.subject] = record.seq
+        elif record.event == "runqueue_insert_begin" and record.subject in pending_wakes:
+            require(record.arg0 == ord("M"), f"woken task lost blocked state before READY: {record}")
+        elif record.event == "runqueue_insert_publish" and record.subject in pending_wakes:
+            require(
+                record.subject in result_published,
+                f"task READY before receive result: tid={record.subject}",
+            )
+            require(
+                result_published[record.subject] < record.seq,
+                f"receive result does not precede READY: tid={record.subject}",
+            )
+            require(record.arg0 == ord("r"), f"woken task published in wrong state: {record}")
+            del pending_wakes[record.subject]
+            del result_published[record.subject]
+
+    require(not pending_wakes, f"wake without READY publication: tids={sorted(pending_wakes)}")
+    require(not result_published, f"orphan receive results: tids={sorted(result_published)}")
+    if require_blocking:
+        require(bool(block_harts), "blocking IPC trace contains no blocked receiver")
+        require(bool(wake_harts), "blocking IPC trace contains no wake")
+        require(not waiting_tasks, f"blocked receivers left behind: tids={sorted(waiting_tasks)}")
+    if require_cross_hart:
+        require(cross_hart_wakes > 0, "no cross-hart block/wake pair observed")
 
 
 def check_runqueues(records: list[Record]) -> None:
@@ -209,6 +317,8 @@ def check_runqueues(records: list[Record]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-harts", type=int)
+    parser.add_argument("--require-blocking-ipc", action="store_true")
+    parser.add_argument("--require-cross-hart-wake", action="store_true")
     parser.add_argument("log", type=Path)
     args = parser.parse_args()
 
@@ -216,7 +326,7 @@ def main() -> int:
     records.sort(key=lambda record: record.seq)
     check_sequence(records, dropped)
     check_operations(records)
-    check_ipc_fifo(records)
+    check_ipc(records, args.require_blocking_ipc, args.require_cross_hart_wake)
     check_runqueues(records)
 
     observed_harts = {record.hart for record in records}

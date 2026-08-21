@@ -63,6 +63,12 @@ option(
 )
 
 option(
+    JIXIA_M00_08_03_02_PROBE
+    "Boot the M00-08.03.02 blocking receive IPC probe"
+    OFF
+)
+
+option(
     JIXIA_VERIFICATION
     "Compile verification-only trace and deterministic test-point hooks"
     OFF
@@ -292,6 +298,14 @@ if(JIXIA_M00_08_03_01_PROBE)
     )
 endif()
 
+if(JIXIA_M00_08_03_02_PROBE)
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_M00_08_03_02_PROBE=1
+    )
+endif()
+
 if(JIXIA_VERIFICATION)
     if(NOT JIXIA_VERIFICATION_SEED MATCHES "^[0-9]+$")
         message(FATAL_ERROR "JIXIA_VERIFICATION_SEED must be an unsigned integer")
@@ -322,6 +336,17 @@ if(JIXIA_VERIFICATION)
     endif()
 elseif(JIXIA_VERIFICATION_JITTER)
     message(FATAL_ERROR "JIXIA_VERIFICATION_JITTER requires JIXIA_VERIFICATION")
+endif()
+
+# Verification is a distinct firmware artifact, following Hostboot's
+# production-image/test-image split. The logical CMake target remains stable
+# for existing scripts, but a verification build can never overwrite or be
+# mistaken for the production jixia.elf/jixia.bin artifacts.
+if(JIXIA_VERIFICATION)
+    set(JIXIA_FIRMWARE_BASENAME "jixia-verify")
+    set_target_properties(jixia.elf PROPERTIES OUTPUT_NAME "jixia-verify.elf")
+else()
+    set(JIXIA_FIRMWARE_BASENAME "jixia")
 endif()
 
 target_compile_options(
@@ -357,7 +382,7 @@ target_link_options(
 
         -Wl,--gc-sections
         -Wl,--build-id=none
-        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia.map
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.map
 
         -T${JIXIA_LINKER_SCRIPT}
 )
@@ -378,7 +403,7 @@ add_custom_command(
         ${JIXIA_OBJCOPY}
         -O binary
         $<TARGET_FILE:jixia.elf>
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.bin
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.bin
 
     COMMAND
         ${JIXIA_OBJDUMP}
@@ -386,14 +411,14 @@ add_custom_command(
         -S
         $<TARGET_FILE:jixia.elf>
         >
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.dis
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.dis
 
     COMMAND
         ${JIXIA_READELF}
         -a
         $<TARGET_FILE:jixia.elf>
         >
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.readelf
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.readelf
 
     COMMENT "Generating Jixia firmware image and inspection files"
 )

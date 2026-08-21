@@ -103,7 +103,11 @@ cmake \
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
-readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
+if [[ "${VERIFICATION}" == "1" ]]; then
+    readonly FIRMWARE="${BUILD_PATH}/jixia-verify.bin"
+else
+    readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
+fi
 if [[ ! -f "${FIRMWARE}" ]]; then
     echo "Firmware image not found: ${FIRMWARE}" >&2
     exit 1

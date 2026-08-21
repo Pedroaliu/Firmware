@@ -15,6 +15,7 @@
 extern "C" char jixia_user_init_task[];
 extern "C" char jixia_user_preemption_init_task[];
 extern "C" char jixia_user_ipc_init_task[];
+extern "C" char jixia_user_ipc_blocking_init_task[];
 extern "C" void jixia_release_executive_harts();
 extern "C" [[noreturn]] void jixia_task_enter_first(jixia::arch::riscv::TrapFrame* frame,
                                                     uintptr_t satp);
@@ -73,7 +74,7 @@ void Kernel::ipc_bootstrap() {
      */
     ipc::EndpointManager::instance();
 
-#ifdef JIXIA_M00_08_03_01_PROBE
+#if defined(JIXIA_M00_08_03_01_PROBE) || defined(JIXIA_M00_08_03_02_PROBE)
     if (ipc::EndpointManager::debug_probe_generation_ceiling()) {
         printk("M00_08_IPC_GENERATION_CEILING: PASS\n");
         printk("M00_08_IPC_SLOT_RETIREMENT: PASS\n");
@@ -96,7 +97,10 @@ bool Kernel::init_task_bootstrap() {
     hart::HartLocal& boot = cpu::CpuManager::instance().boot_hart();
     const auto& address_space = memory::VmmManager::instance().boot_address_space();
 
-#if defined(JIXIA_M00_08_03_01_PROBE)
+#if defined(JIXIA_M00_08_03_02_PROBE)
+    const task::EntryPoint entry =
+        reinterpret_cast<task::EntryPoint>(jixia_user_ipc_blocking_init_task);
+#elif defined(JIXIA_M00_08_03_01_PROBE)
     const task::EntryPoint entry = reinterpret_cast<task::EntryPoint>(jixia_user_ipc_init_task);
 #elif defined(JIXIA_M00_08_02_PROBE)
     const task::EntryPoint entry =
@@ -174,7 +178,9 @@ void Kernel::deferred_bootstrap() {
         hart::park();
     }
 
-#if defined(JIXIA_M00_08_03_01_PROBE)
+#if defined(JIXIA_M00_08_03_02_PROBE)
+    const char* executive_header = "[Jixia][M00-08.03.02][IpcBlockingRecv]";
+#elif defined(JIXIA_M00_08_03_01_PROBE)
     const char* executive_header = "[Jixia][M00-08.03.01][IpcNonblocking]";
 #elif defined(JIXIA_M00_08_02_PROBE)
     const char* executive_header = "[Jixia][M00-08.02][HostbootSchedulerAlignment]";

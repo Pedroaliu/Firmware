@@ -67,4 +67,21 @@ for hart_count in "${harts[@]}"; do
     done
 done
 
+for seed in "${seeds[@]}"; do
+    blocking_case_dir="${ARTIFACT_ROOT}/qemu-blocking-seed${seed}"
+    mkdir -p "${blocking_case_dir}"
+    echo "NIGHTLY_BLOCKING_BEGIN: smp=1,2 seed=${seed}" |
+        tee "${blocking_case_dir}/case.log"
+
+    JIXIA_M00_08_03_02_BUILD_DIR="${blocking_case_dir}/build" \
+    JIXIA_QEMU_TIMEOUT_SECONDS="${QEMU_TIMEOUT}" \
+    JIXIA_VERIFICATION_SEED="${seed}" \
+    JIXIA_VERIFICATION_TRACE_RECORDS="${TRACE_RECORDS}" \
+        bash "${ROOT_DIR}/scripts/test-m00-08-03-02-ipc-blocking-recv.sh" 2>&1 |
+        tee -a "${blocking_case_dir}/case.log"
+
+    echo "NIGHTLY_BLOCKING_END: smp=1,2 seed=${seed} result=PASS" |
+        tee -a "${blocking_case_dir}/case.log"
+done
+
 echo "JIXIA_MICROKERNEL_NIGHTLY: PASS run_id=${RUN_ID} artifacts=${ARTIFACT_ROOT}"

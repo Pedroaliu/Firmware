@@ -10,11 +10,11 @@
 #define JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY 7
 #define JIXIA_TASK_SYSCALL_SEND 8
 /*
- * Numbers 9 (ipc_call), 10 (ipc_recv), and 12 (ipc_reply) are reserved by the
- * M00-08.03 IPC ABI. M00-08.03.01 implements only the non-blocking subset
- * (6, 7, 8, 11); the reserved numbers return -ENOSYS until the blocking IPC
- * increments land. The numbering itself is frozen here so later increments
- * never renumber the ABI.
+ * Numbers 9 (ipc_call) and 12 (ipc_reply) are reserved by the M00-08.03 IPC
+ * ABI and return -ENOSYS until the call/reply increments land. M00-08.03.02
+ * implements number 10 as the blocking ipc_recv (syscall 11 stays the
+ * non-blocking try_recv). The numbering itself is frozen here so later
+ * increments never renumber the ABI.
  */
 #define JIXIA_TASK_SYSCALL_CALL 9
 #define JIXIA_TASK_SYSCALL_RECV 10

@@ -57,18 +57,26 @@ const char* event_name(Event event) {
         return "ipc_destroy_begin";
     case Event::ipc_destroy_dead:
         return "ipc_destroy_dead";
+    case Event::ipc_destroy_wake:
+        return "ipc_destroy_wake";
     case Event::ipc_destroy_reject:
         return "ipc_destroy_reject";
     case Event::ipc_send_begin:
         return "ipc_send_begin";
     case Event::ipc_send_enqueue:
         return "ipc_send_enqueue";
+    case Event::ipc_send_wake:
+        return "ipc_send_wake";
     case Event::ipc_send_reject:
         return "ipc_send_reject";
     case Event::ipc_recv_begin:
         return "ipc_recv_begin";
     case Event::ipc_recv_dequeue:
         return "ipc_recv_dequeue";
+    case Event::ipc_recv_wait_enqueue:
+        return "ipc_recv_wait_enqueue";
+    case Event::ipc_recv_result_publish:
+        return "ipc_recv_result_publish";
     case Event::ipc_recv_reject:
         return "ipc_recv_reject";
     case Event::runqueue_insert_begin:

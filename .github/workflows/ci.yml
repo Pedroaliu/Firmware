@@ -203,6 +203,11 @@ jobs:
           JIXIA_QEMU_TIMEOUT_SECONDS=10 \
             bash scripts/test-m00-08-03-01-ipc-nonblocking.sh
 
+      - name: M00-08.03.02 blocking IPC
+        run: |
+          JIXIA_QEMU_TIMEOUT_SECONDS=15 \
+            bash scripts/test-m00-08-03-02-ipc-blocking-recv.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -228,12 +233,47 @@ jobs:
             build/m00-08-01/
             build/m00-08-02/
             build/m00-08-03-01/
+            build/m00-08-03-02/
+
+  verification-suite:
+    name: Independent microkernel verification
+    needs: scope
+    if: ${{ needs.scope.outputs.full_ci == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Executable models and checker mutation tests
+        run: |
+          bash scripts/test-microkernel-verification-tools.sh
+
+      - name: Production IPC host torture and sanitizers
+        env:
+          JIXIA_TORTURE_SEEDS: "1 7 42"
+          JIXIA_TORTURE_MESSAGES: "5000"
+          JIXIA_HOST_TSAN: "1"
+        run: |
+          bash scripts/test-microkernel-host-torture.sh
+
+      - name: Upload independent verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jixia-verification-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            build/host-torture/*.log
 
   required:
     name: RV64 QEMU regression
     needs:
       - scope
       - full-regression
+      - verification-suite
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -245,6 +285,7 @@ jobs:
           FULL_CI: ${{ needs.scope.outputs.full_ci }}
           FULL_RESULT: ${{ needs.full-regression.result }}
           SCOPE_RESULT: ${{ needs.scope.result }}
+          VERIFICATION_RESULT: ${{ needs.verification-suite.result }}
         run: |
           set -euo pipefail
 
@@ -259,9 +300,21 @@ jobs:
             exit 1
           fi
 
+          if [[ "${FULL_CI}" == "true" &&
+                "${VERIFICATION_RESULT}" != "success" ]]; then
+            echo "independent verification failed: ${VERIFICATION_RESULT}" >&2
+            exit 1
+          fi
+
           if [[ "${FULL_CI}" == "false" &&
                 "${FULL_RESULT}" != "skipped" ]]; then
             echo "research-only fast path expected a skipped full regression" >&2
+            exit 1
+          fi
+
+          if [[ "${FULL_CI}" == "false" &&
+                "${VERIFICATION_RESULT}" != "skipped" ]]; then
+            echo "research-only fast path expected skipped independent verification" >&2
             exit 1
           fi
 
