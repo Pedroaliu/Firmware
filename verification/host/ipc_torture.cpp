@@ -12,9 +12,9 @@
 namespace {
 
 using jixia::microkernel::ipc::EndpointManager;
-using jixia::microkernel::ipc::Message;
 using jixia::microkernel::ipc::kErrorAgain;
 using jixia::microkernel::ipc::kErrorInvalidArgument;
+using jixia::microkernel::ipc::Message;
 using jixia::microkernel::task::TaskId;
 
 constexpr TaskId kOwner = 1U;
@@ -179,8 +179,8 @@ bool run_mpmc_exactly_once(uint64_t seed, unsigned messages_per_producer) {
 
             for (unsigned sequence = 0U; sequence < messages_per_producer && !failed.load();
                  ++sequence) {
-                const uint64_t id = static_cast<uint64_t>(producer) * messages_per_producer +
-                                    sequence;
+                const uint64_t id =
+                    static_cast<uint64_t>(producer) * messages_per_producer + sequence;
                 const uint64_t words[4] = {id, ~id, seed, id ^ seed ^ 0xC0DEC0DEULL};
                 for (;;) {
                     const intptr_t result = EndpointManager::instance().send(
@@ -331,14 +331,13 @@ bool run_destroy_race(uint64_t seed) {
 
     const uint64_t words[4] = {0xDEADU, 0xBEEFU, seed, live_handle};
     Message message{};
-    const bool isolated = live_handle != stale_handle &&
-                          EndpointManager::instance().send(999U, stale_handle, words) ==
-                              kErrorInvalidArgument &&
-                          EndpointManager::instance().try_recv(stale_handle, &message) ==
-                              kErrorInvalidArgument &&
-                          EndpointManager::instance().send(999U, live_handle, words) == 0 &&
-                          EndpointManager::instance().try_recv(live_handle, &message) == 0 &&
-                          message.sender == 999U && message.words[0] == words[0];
+    const bool isolated =
+        live_handle != stale_handle &&
+        EndpointManager::instance().send(999U, stale_handle, words) == kErrorInvalidArgument &&
+        EndpointManager::instance().try_recv(stale_handle, &message) == kErrorInvalidArgument &&
+        EndpointManager::instance().send(999U, live_handle, words) == 0 &&
+        EndpointManager::instance().try_recv(live_handle, &message) == 0 &&
+        message.sender == 999U && message.words[0] == words[0];
     return destroy_endpoint(live_handle) && isolated;
 }
 

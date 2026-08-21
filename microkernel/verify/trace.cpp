@@ -174,28 +174,24 @@ void dump() {
         const uint64_t head = __atomic_load_n(&buffer.head, __ATOMIC_ACQUIRE);
         for (uint64_t index = 0U; index < head; ++index) {
             const TraceRecord& entry = buffer.records[index];
-            printk("JIXIA_VERIFY_TRACE: seq=%lu time=%lu hart=%lu op=%lu event=%s "
-                   "lockset=%lu object=%lu subject=%lu arg0=%lu arg1=%lu\n",
-                   static_cast<unsigned long>(entry.sequence),
-                   static_cast<unsigned long>(entry.timestamp),
-                   static_cast<unsigned long>(entry.hart),
-                   static_cast<unsigned long>(entry.operation),
-                   event_name(static_cast<Event>(entry.event)),
-                   static_cast<unsigned long>(entry.lockset),
-                   static_cast<unsigned long>(entry.object),
-                   static_cast<unsigned long>(entry.subject),
-                   static_cast<unsigned long>(entry.arg0),
-                   static_cast<unsigned long>(entry.arg1));
+            printk(
+                "JIXIA_VERIFY_TRACE: seq=%lu time=%lu hart=%lu op=%lu event=%s "
+                "lockset=%lu object=%lu subject=%lu arg0=%lu arg1=%lu\n",
+                static_cast<unsigned long>(entry.sequence),
+                static_cast<unsigned long>(entry.timestamp), static_cast<unsigned long>(entry.hart),
+                static_cast<unsigned long>(entry.operation),
+                event_name(static_cast<Event>(entry.event)),
+                static_cast<unsigned long>(entry.lockset), static_cast<unsigned long>(entry.object),
+                static_cast<unsigned long>(entry.subject), static_cast<unsigned long>(entry.arg0),
+                static_cast<unsigned long>(entry.arg1));
         }
         printk("JIXIA_VERIFY_TRACE_HART: hart=%lu records=%lu dropped=%lu\n",
                static_cast<unsigned long>(hart_index), static_cast<unsigned long>(head),
-               static_cast<unsigned long>(
-                   __atomic_load_n(&buffer.dropped, __ATOMIC_RELAXED)));
+               static_cast<unsigned long>(__atomic_load_n(&buffer.dropped, __ATOMIC_RELAXED)));
     }
 
     printk("JIXIA_VERIFY_TRACE_END: sequence=%lu\n",
-           static_cast<unsigned long>(
-               __atomic_load_n(&g_global_sequence, __ATOMIC_RELAXED)));
+           static_cast<unsigned long>(__atomic_load_n(&g_global_sequence, __ATOMIC_RELAXED)));
 }
 
 } // namespace jixia::microkernel::verify

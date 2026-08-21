@@ -71,8 +71,7 @@ intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
     }
 
     JIXIA_VERIFY_POINT(verify::Event::ipc_create_reject, operation, 0U, owner,
-                       static_cast<uint64_t>(kErrorNoSpace), 0U,
-                       verify::lock_endpoint_table);
+                       static_cast<uint64_t>(kErrorNoSpace), 0U, verify::lock_endpoint_table);
     return kErrorNoSpace;
 }
 
@@ -132,8 +131,7 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
 }
 
 intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4]) {
-    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_send_begin, handle, sender, words[0],
-                           0U);
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_send_begin, handle, sender, words[0], 0U);
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
         JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,

@@ -81,9 +81,9 @@ void dump();
     const uint64_t name =                                                                          \
         ::jixia::microkernel::verify::begin((event), (object), (subject), (arg0), (arg1))
 #define JIXIA_VERIFY_LOCKED_OPERATION(name, event, object, subject, arg0, arg1, lockset)           \
-    const uint64_t name = ::jixia::microkernel::verify::begin(                                    \
-        (event), (object), (subject), (arg0), (arg1), (lockset))
-#define JIXIA_VERIFY_BEGIN(event, object, subject, arg0, arg1)                                    \
+    const uint64_t name = ::jixia::microkernel::verify::begin((event), (object), (subject),        \
+                                                              (arg0), (arg1), (lockset))
+#define JIXIA_VERIFY_BEGIN(event, object, subject, arg0, arg1)                                     \
     (::jixia::microkernel::verify::begin((event), (object), (subject), (arg0), (arg1)))
 #define JIXIA_VERIFY_POINT(event, operation, object, subject, arg0, arg1, lockset)                 \
     (::jixia::microkernel::verify::point((event), (operation), (object), (subject), (arg0),        \

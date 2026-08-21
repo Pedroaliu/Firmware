@@ -66,10 +66,9 @@ task::Task* RunQueue::remove() {
     if (selected == nullptr) {
         return nullptr;
     }
-    JIXIA_VERIFY_LOCKED_OPERATION(operation, verify::Event::runqueue_remove_begin,
-                                  reinterpret_cast<uintptr_t>(this), selected->tid,
-                                  static_cast<uint64_t>(selected->state), size_,
-                                  verify::lock_runqueue);
+    JIXIA_VERIFY_LOCKED_OPERATION(
+        operation, verify::Event::runqueue_remove_begin, reinterpret_cast<uintptr_t>(this),
+        selected->tid, static_cast<uint64_t>(selected->state), size_, verify::lock_runqueue);
     JIXIA_VERIFY_TEST_POINT(verify::TestPoint::runqueue_remove_locked, operation,
                             reinterpret_cast<uintptr_t>(this), verify::lock_runqueue);
 
