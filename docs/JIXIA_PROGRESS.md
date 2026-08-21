@@ -397,15 +397,17 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 - Scheduler/TaskManager guards: `RunQueue::insert/remove`, `Scheduler::add_task`,
   `set_current_task`, and `release_task_locked` refuse a task still in a waiting
   FIFO — no early run, no silent UAF. Lock order extended one-way to
-  `table -> endpoint -> {runqueue, delay-queue}`; `printk` gained a per-call
-  spinlock for two-hart marker emission.
-- Acceptance: `scripts/test-m00-08-03-02-ipc-blocking-recv.sh` ×3 PASS — `--smp 1`
+  `table -> endpoint -> {runqueue, delay-queue}`. Production `printk` remains
+  unchanged; SMP correctness uses the verification-only structured trace.
+- Acceptance: `scripts/test-m00-08-03-02-ipc-blocking-recv.sh` builds the distinct
+  `jixia-verify.bin` test image. The normal `jixia.bin` contains no trace/jitter
+  machinery or test-only IPC outputs. Its `--smp 1`
   deterministic C02 (recv-before-send), C05 (two-receiver FIFO pairing + third
   send pends), C12 (destroy `-EIDRM` + stale `-EINVAL`), C13a (timer preemption
-  while blocked), C19 drained + reserved `-ENOSYS`, ordered-marker chains, and
-  exactly-once wake accounting (`blocks == send_wakes + destroy_wakes`); `--smp 2`
-  C19 64-round stress with `-EAGAIN` retry proving both harts participate and at
-  least one task blocks on one hart and is woken from the other. M00-08.01,
+  while blocked), C19 drained + reserved `-ENOSYS`, ordered workload markers;
+  the independent trace checker reconstructs FIFO waiters and proves one
+  wake/result/READY publication per block. Its `--smp 2` C19 64-round stress
+  with `-EAGAIN` retry requires both harts and a cross-hart wake. M00-08.01,
   M00-08.02, M00-08.03.01 regressions and the default no-probe build stay green.
 - ABI frozen in `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (FROZEN FOR
   IMPLEMENTATION / PR pending). M00-08.03 stays ACTIVE: call/reply, ReplyToken,

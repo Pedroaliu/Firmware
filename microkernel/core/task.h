@@ -5,15 +5,13 @@
 
 #include "microkernel/arch/riscv/sv39.h"
 #include "microkernel/core/task_context.h"
+#include "microkernel/core/task_types.h"
 
 namespace jixia::microkernel::hart {
 struct HartLocal;
 }
 
 namespace jixia::microkernel::task {
-
-using TaskId = uint64_t;
-using EntryPoint = uintptr_t;
 
 enum class TaskState : uint8_t {
     running = 'R',

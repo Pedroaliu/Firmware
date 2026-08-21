@@ -3,6 +3,7 @@
 #include "microkernel/core/hart.h"
 #include "microkernel/core/scheduler.h"
 #include "microkernel/core/vmm_manager.h"
+#include "microkernel/verify/trace.h"
 
 extern "C" char jixia_user_idle_task[];
 extern "C" char jixia_user_task_end_stub[];
@@ -400,6 +401,13 @@ void TaskManager::set_current_task(Task& task) {
     task.cpu = &local;
     task.state = TaskState::running;
     local.current_task = &task;
+#if defined(JIXIA_VERIFICATION)
+    /* Idle's yield loop is intentionally not a trace producer. */
+    if (!task.idle) {
+        JIXIA_VERIFY_POINT(verify::Event::task_current_publish, 0U, local.index, task.tid,
+                           static_cast<uint64_t>(task.state), 0U, verify::lock_none);
+    }
+#endif
 }
 
 void TaskManager::save_current_context(const jixia::arch::riscv::TrapFrame& frame) {

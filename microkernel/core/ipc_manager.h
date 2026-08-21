@@ -5,7 +5,11 @@
 
 #include "microkernel/core/singleton.h"
 #include "microkernel/core/spinlock.h"
-#include "microkernel/core/task.h"
+#include "microkernel/core/task_types.h"
+
+namespace jixia::microkernel::task {
+struct Task;
+}
 
 namespace jixia::microkernel::ipc {
 
@@ -108,19 +112,15 @@ class EndpointManager final {
 
     /*
      * Owner-only teardown: -EACCES for non-owners, -EINVAL for stale handles.
-     * Every blocked receiver is woken with -EIDRM; when woken_receivers is
-     * non-null it receives the number of tasks woken (M00-08.03.02).
+     * Every blocked receiver is woken exactly once with -EIDRM.
      */
-    [[nodiscard]] intptr_t destroy_endpoint(TaskId caller, uint64_t handle,
-                                            size_t* woken_receivers = nullptr);
+    [[nodiscard]] intptr_t destroy_endpoint(TaskId caller, uint64_t handle);
 
     /*
      * Enqueues sender + payload. -EAGAIN when the FIFO is full. If a receiver
-     * is blocked on the endpoint, exactly one is woken instead (M00-08.03.02);
-     * when woken_receiver is non-null it receives that task's tid. Never blocks.
+     * is blocked on the endpoint, exactly one is woken instead. Never blocks.
      */
-    [[nodiscard]] intptr_t send(TaskId sender, uint64_t handle, const uint64_t (&words)[4],
-                                TaskId* woken_receiver = nullptr);
+    [[nodiscard]] intptr_t send(TaskId sender, uint64_t handle, const uint64_t (&words)[4]);
 
     /*
      * M00-08.03.02 blocking receive. The caller must be the current task of the

@@ -10,6 +10,7 @@
 #include "microkernel/core/time_manager.h"
 #include "microkernel/core/vmm_manager.h"
 #include "microkernel/memory/page_manager.h"
+#include "microkernel/verify/trace.h"
 
 extern "C" char jixia_user_init_task[];
 extern "C" char jixia_user_preemption_init_task[];
@@ -89,6 +90,7 @@ void Kernel::platform_status_bootstrap() {
 
 void Kernel::debug_bootstrap() {
     /* The Hostboot-style debug pointer registry is not allocated pre-heap. */
+    JIXIA_VERIFY_INITIALIZE();
 }
 
 bool Kernel::init_task_bootstrap() {

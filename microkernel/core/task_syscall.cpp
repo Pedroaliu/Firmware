@@ -12,6 +12,7 @@
 #include "microkernel/core/task_manager.h"
 #include "microkernel/core/time_manager.h"
 #include "microkernel/core/vmm_manager.h"
+#include "microkernel/verify/trace.h"
 
 namespace jixia::microkernel::task::syscall {
 namespace {
@@ -67,13 +68,10 @@ uint64_t g_ipc_full_handle = 0U;
 #endif
 
 #ifdef JIXIA_M00_08_03_02_PROBE
-bool g_ipc_c02_blocked_reported = false;
-bool g_ipc_c02_wake_reported = false;
 bool g_ipc_c02_child_reported = false;
 bool g_ipc_c05_r1_reported = false;
 bool g_ipc_c05_r2_reported = false;
 bool g_ipc_c05_no_phantom_reported = false;
-bool g_ipc_c12_destroy_wake_reported = false;
 bool g_ipc_c12_stale_reported = false;
 bool g_ipc_c12_child_reported = false;
 bool g_ipc_c13a_child_reported = false;
@@ -82,26 +80,11 @@ bool g_ipc_c19_receiver_reported = false;
 bool g_ipc_c19_drained_reported = false;
 bool g_ipc_reserved_02_reported = false;
 uint64_t g_ipc02_last_destroyed_handle = 0U;
-uint64_t g_ipc02_block_count = 0U;
-uint64_t g_ipc02_send_wake_count = 0U;
-uint64_t g_ipc02_destroy_wake_count = 0U;
 #endif
 
 [[nodiscard]] uintptr_t error_value(intptr_t error) {
     return static_cast<uintptr_t>(error);
 }
-
-#ifdef JIXIA_M00_08_03_02_PROBE
-/*
- * Probe markers fire from any hart (block on one, wake on the other), so
- * every one-shot claim and counter is an atomic — a plain bool check-then-set
- * would let two harts print the same PASS line, and a plain increment could
- * lose wake/block counts.
- */
-[[nodiscard]] bool claim_once(bool& flag) {
-    return !__atomic_exchange_n(&flag, true, __ATOMIC_ACQ_REL);
-}
-#endif
 
 } // namespace
 
@@ -213,6 +196,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 
         if (initial_task && detached && return_value == JIXIA_M00_08_IPC_INIT_RESULT) {
             printk("M00_08_IPC_NONBLOCKING: PASS\n");
+            JIXIA_VERIFY_DUMP();
         }
 #endif
 
@@ -255,15 +239,8 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
         }
 
         if (initial_task && detached && return_value == JIXIA_M00_08_IPC_BLOCKING_INIT_RESULT) {
-            /*
-             * Exactly-once wake accounting: every block is resolved by exactly
-             * one send wake or one destroy wake across the whole workload.
-             */
-            printk("M00_08_IPC_C19_SUMMARY: blocks=%lu send_wakes=%lu destroy_wakes=%lu\n",
-                   static_cast<unsigned long>(g_ipc02_block_count),
-                   static_cast<unsigned long>(g_ipc02_send_wake_count),
-                   static_cast<unsigned long>(g_ipc02_destroy_wake_count));
             printk("M00_08_IPC_BLOCKING_RECV: PASS\n");
+            JIXIA_VERIFY_DUMP();
         }
 #endif
         break;
@@ -352,9 +329,8 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 
     case JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY: {
         const uint64_t handle = caller->context.x[10];
-        size_t woken_receivers = 0U;
-        const intptr_t result = ipc::EndpointManager::instance().destroy_endpoint(
-            caller->tid, handle, &woken_receivers);
+        const intptr_t result =
+            ipc::EndpointManager::instance().destroy_endpoint(caller->tid, handle);
         caller->context.x[10] = (result < 0) ? error_value(result) : 0U;
 
 #ifdef JIXIA_M00_08_03_01_PROBE
@@ -373,16 +349,6 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
 #ifdef JIXIA_M00_08_03_02_PROBE
         if (result == 0) {
             g_ipc02_last_destroyed_handle = handle;
-            if (woken_receivers > 0U) {
-                __atomic_add_fetch(&g_ipc02_destroy_wake_count, woken_receivers, __ATOMIC_RELAXED);
-                printk("M00_08_IPC_DESTROY_WAKE_EVIDENCE: hart=%lu woken=%lu handle=%#lx\n",
-                       static_cast<unsigned long>(hart::current().index),
-                       static_cast<unsigned long>(woken_receivers),
-                       static_cast<unsigned long>(handle));
-                if (claim_once(g_ipc_c12_destroy_wake_reported)) {
-                    printk("M00_08_IPC_C12_DESTROY_WOKE: PASS\n");
-                }
-            }
         }
 #endif
         break;
@@ -397,23 +363,10 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
             caller->context.x[14],
         };
         /* send never blocks: the caller stays current and safe to touch. */
-        ipc::TaskId woken_receiver = 0U;
-        const intptr_t result =
-            ipc::EndpointManager::instance().send(caller->tid, handle, words, &woken_receiver);
+        const intptr_t result = ipc::EndpointManager::instance().send(caller->tid, handle, words);
         caller->context.x[10] = (result < 0) ? error_value(result) : 0U;
 
 #ifdef JIXIA_M00_08_03_02_PROBE
-        if ((result == 0) && (woken_receiver != 0U)) {
-            __atomic_add_fetch(&g_ipc02_send_wake_count, 1U, __ATOMIC_RELAXED);
-            printk("M00_08_IPC_SEND_WAKE_EVIDENCE: tid=%lu hart=%lu sender=%lu handle=%#lx\n",
-                   static_cast<unsigned long>(woken_receiver),
-                   static_cast<unsigned long>(hart::current().index),
-                   static_cast<unsigned long>(caller->tid), static_cast<unsigned long>(handle));
-            if (claim_once(g_ipc_c02_wake_reported)) {
-                printk("M00_08_IPC_C02_SEND_WOKE: PASS\n");
-            }
-        }
-
         if ((result == ipc::kErrorInvalidArgument) && (handle == g_ipc02_last_destroyed_handle) &&
             !g_ipc_c12_stale_reported) {
             printk("M00_08_IPC_C12_STALE_HANDLE: PASS\n");
@@ -591,26 +544,13 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
          * another hart, so the old Task/Context must not be touched again on
          * that path. The endpoint layer writes a0..a5 into the caller's saved
          * registers itself on the delivered/rejected paths.
-         */
+        */
         const uint64_t handle = caller->context.x[10];
-#ifdef JIXIA_M00_08_03_02_PROBE
-        const TaskId receiver_tid = caller->tid;
-        const uintptr_t recv_hart = static_cast<uintptr_t>(hart::current().index);
-#endif
         const ipc::RecvResult result = ipc::EndpointManager::instance().recv(*caller, handle);
 
         if (result.status == ipc::RecvStatus::blocked) {
             /* The trap frame must be reloaded from the newly selected task. */
             rescheduled = true;
-#ifdef JIXIA_M00_08_03_02_PROBE
-            __atomic_add_fetch(&g_ipc02_block_count, 1U, __ATOMIC_RELAXED);
-            printk("M00_08_IPC_RECV_BLOCK_EVIDENCE: tid=%lu hart=%lu handle=%#lx\n",
-                   static_cast<unsigned long>(receiver_tid), static_cast<unsigned long>(recv_hart),
-                   static_cast<unsigned long>(handle));
-            if (claim_once(g_ipc_c02_blocked_reported)) {
-                printk("M00_08_IPC_C02_RECV_BLOCKED: PASS\n");
-            }
-#endif
         }
         /* delivered/rejected: recv() already wrote the caller's a0..a5. */
         break;

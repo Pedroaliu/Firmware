@@ -10,10 +10,13 @@ readonly BUILD_PATH="${JIXIA_M00_08_03_02_BUILD_DIR:-${ROOT_DIR}/build/m00-08-03
 readonly TIMEOUT_SECONDS="${JIXIA_QEMU_TIMEOUT_SECONDS:-10}"
 readonly CLEAN_SMP1="${BUILD_PATH}/m00-08-03-02.smp1.log"
 readonly CLEAN_SMP2="${BUILD_PATH}/m00-08-03-02.smp2.log"
+readonly VERIFICATION_SEED="${JIXIA_VERIFICATION_SEED:-1}"
+readonly VERIFICATION_TRACE_RECORDS="${JIXIA_VERIFICATION_TRACE_RECORDS:-8192}"
 
 for command_name in \
     cmake \
     ninja \
+    python3 \
     qemu-system-riscv64 \
     riscv64-unknown-elf-gcc \
     riscv64-unknown-elf-g++ \
@@ -41,11 +44,15 @@ cmake \
     -DCMAKE_OBJCOPY=riscv64-unknown-elf-objcopy \
     -DCMAKE_OBJDUMP=riscv64-unknown-elf-objdump \
     -DCMAKE_READELF=riscv64-unknown-elf-readelf \
-    -DJIXIA_M00_08_03_02_PROBE=ON
+    -DJIXIA_M00_08_03_02_PROBE=ON \
+    -DJIXIA_VERIFICATION=ON \
+    -DJIXIA_VERIFICATION_JITTER=OFF \
+    "-DJIXIA_VERIFICATION_SEED=${VERIFICATION_SEED}" \
+    "-DJIXIA_VERIFICATION_TRACE_RECORDS=${VERIFICATION_TRACE_RECORDS}"
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
-readonly FIRMWARE="${BUILD_PATH}/jixia.bin"
+readonly FIRMWARE="${BUILD_PATH}/jixia-verify.bin"
 if [[ ! -f "${FIRMWARE}" ]]; then
     echo "Firmware image not found: ${FIRMWARE}" >&2
     exit 1
@@ -82,28 +89,29 @@ run_qemu() {
     fi
 
     tr -d '\r' <"${serial_log}" >"${clean_log}"
-    cat "${clean_log}"
+    # Marker output before the final dump may interleave across harts. Keep the
+    # complete log for the structured checker while suppressing trace volume.
+    grep -v '^JIXIA_VERIFY_TRACE: ' "${clean_log}" || true
 }
 
-for forbidden_marker in \
-    "M00_08_HOSTBOOT_BOOTSTRAP: FAIL" \
-    "Invalid task syscall" \
-    "[Jixia][Microkernel][fatal trap]" \
-    "M00_08_IPC_GENERATION_CEILING: FAIL"
-do
-    for run_log in "${CLEAN_SMP1}" "${CLEAN_SMP2}"; do
-        if [[ ! -f "${run_log}" ]]; then
-            continue
-        fi
+check_forbidden_markers() {
+    local run_log="$1"
+    for forbidden_marker in \
+        "M00_08_HOSTBOOT_BOOTSTRAP: FAIL" \
+        "Invalid task syscall" \
+        "[Jixia][Microkernel][fatal trap]" \
+        "M00_08_IPC_GENERATION_CEILING: FAIL"
+    do
         if grep -Fq "${forbidden_marker}" "${run_log}"; then
             echo "M00-08.03.02: forbidden marker observed: ${forbidden_marker}" >&2
             exit 1
         fi
     done
-done
+}
 
 # ---- Run 1: --smp 1 deterministic acceptance (C02/C05/C12/C13a + regressions) ----
 run_qemu 1 "${CLEAN_SMP1}"
+check_forbidden_markers "${CLEAN_SMP1}"
 
 for required_marker in \
     "M00_07_CONTAINED_MEMORY: PASS" \
@@ -124,13 +132,10 @@ for required_marker in \
     "M00_08_IDLE_TASK: PASS" \
     "M00_08_IPC_GENERATION_CEILING: PASS" \
     "M00_08_IPC_SLOT_RETIREMENT: PASS" \
-    "M00_08_IPC_C02_RECV_BLOCKED: PASS" \
-    "M00_08_IPC_C02_SEND_WOKE: PASS" \
     "M00_08_IPC_C02_WOKE_DELIVERED: PASS" \
     "M00_08_IPC_C05_M1_TO_R1: PASS" \
     "M00_08_IPC_C05_M2_TO_R2: PASS" \
     "M00_08_IPC_C05_THIRD_PENDING: PASS" \
-    "M00_08_IPC_C12_DESTROY_WOKE: PASS" \
     "M00_08_IPC_C12_STALE_HANDLE: PASS" \
     "M00_08_IPC_C12_EIDRM: PASS" \
     "M00_08_IPC_C13A_PREEMPT_WHILE_BLOCKED: PASS" \
@@ -171,13 +176,6 @@ check_marker_order() {
     done
 }
 
-# C02: the block linearization point precedes the wake, then the receiver's
-# own full-register assertion (its END marker) proves the delivered payload.
-check_marker_order \
-    "M00_08_IPC_C02_RECV_BLOCKED" \
-    "M00_08_IPC_C02_SEND_WOKE" \
-    "M00_08_IPC_C02_WOKE_DELIVERED"
-
 # C05: after the case-C02 receiver, the third send pends (drained by init) and
 # each receiver's own payload assertion lands afterwards.
 check_marker_order \
@@ -186,10 +184,9 @@ check_marker_order \
     "M00_08_IPC_C05_M1_TO_R1" \
     "M00_08_IPC_C05_M2_TO_R2"
 
-# C12: destroy wakes the blocked receiver, the old handle then fails -EINVAL,
-# and the receiver resumes with -EIDRM.
+# C12: after teardown the old handle fails -EINVAL, and the receiver resumes
+# with -EIDRM. The trace checker below proves destroy-wake preceded both.
 check_marker_order \
-    "M00_08_IPC_C12_DESTROY_WOKE" \
     "M00_08_IPC_C12_STALE_HANDLE" \
     "M00_08_IPC_C12_EIDRM"
 
@@ -199,92 +196,34 @@ check_marker_order \
     "M00_08_IPC_C13A_PREEMPT_WHILE_BLOCKED" \
     "M00_08_IPC_C13A_RESUMED"
 
-# C19 stress completes fully drained before the summary, which precedes the
-# final PASS. The summary line is numeric evidence, not a ": PASS" marker.
+# C19 stress completes fully drained before the final PASS.
 drained_line="$(grep -Fxn -- 'M00_08_IPC_C19_DRAINED_EAGAIN: PASS' "${CLEAN_SMP1}" | head -n 1 | cut -d: -f1)"
-summary_line="$(grep -Fn 'M00_08_IPC_C19_SUMMARY:' "${CLEAN_SMP1}" | head -n 1 | cut -d: -f1)"
 final_line="$(grep -Fxn -- 'M00_08_IPC_BLOCKING_RECV: PASS' "${CLEAN_SMP1}" | head -n 1 | cut -d: -f1)"
-if [[ -z "${drained_line}" || -z "${summary_line}" || -z "${final_line}" ]] ||
-    (( drained_line >= summary_line || summary_line >= final_line )); then
-    echo "M00-08.03.02 (smp1): C19 drained -> summary -> final order violated" >&2
+if [[ -z "${drained_line}" || -z "${final_line}" ]] || (( drained_line >= final_line )); then
+    echo "M00-08.03.02 (smp1): C19 drained -> final order violated" >&2
     exit 1
 fi
 
-check_wake_accounting() {
-    local run_log="$1"
-    local summary
-    summary="$(grep -F 'M00_08_IPC_C19_SUMMARY:' "${run_log}" | head -n 1)"
-    if [[ -z "${summary}" ]]; then
-        echo "M00-08.03.02: C19 summary line missing in ${run_log}" >&2
-        exit 1
-    fi
-
-    local blocks send_wakes destroy_wakes
-    blocks="$(sed -E 's/.*blocks=([0-9]+).*/\1/' <<<"${summary}")"
-    send_wakes="$(sed -E 's/.*send_wakes=([0-9]+).*/\1/' <<<"${summary}")"
-    destroy_wakes="$(sed -E 's/.*destroy_wakes=([0-9]+).*/\1/' <<<"${summary}")"
-
-    if (( blocks != send_wakes + destroy_wakes )); then
-        echo "M00-08.03.02: wake accounting broken: ${summary}" >&2
-        exit 1
-    fi
-}
-
-# Exactly-once: every block is resolved by exactly one send or destroy wake.
-check_wake_accounting "${CLEAN_SMP1}"
+# The independent checker is the concurrency oracle. It reconstructs endpoint
+# waiter/message state and proves every block has exactly one wake/result/READY
+# publication without exposing test-only counters through the production API.
+python3 "${ROOT_DIR}/scripts/check-microkernel-trace.py" \
+    --expected-harts 1 \
+    --require-blocking-ipc \
+    "${CLEAN_SMP1}"
 
 # ---- Run 2: --smp 2 C19 litmus (real cross-hart block/wake evidence) ----
 run_qemu 2 "${CLEAN_SMP2}"
+check_forbidden_markers "${CLEAN_SMP2}"
 
-for required_marker in \
-    "M00_08_HOSTBOOT_BOOTSTRAP: PASS" \
-    "M00_08_TASK_DISPATCH: PASS" \
-    "M00_08_IPC_C19_SENDER_DONE: PASS" \
-    "M00_08_IPC_C19_RECEIVER_DONE: PASS" \
-    "M00_08_IPC_C19_DRAINED_EAGAIN: PASS" \
-    "M00_08_IPC_CALL_REPLY_ENOSYS: PASS" \
-    "M00_08_IPC_BLOCKING_RECV: PASS"
-do
-    if ! grep -Fxq "${required_marker}" "${CLEAN_SMP2}"; then
-        echo "M00-08.03.02 (smp2): required marker not found: ${required_marker}" >&2
-        exit 1
-    fi
-done
-
-check_wake_accounting "${CLEAN_SMP2}"
-
-# Hart participation: blocking recv and waking send evidence must come from
-# both harts across the stress run.
-block_harts="$(
-    grep -oE 'M00_08_IPC_RECV_BLOCK_EVIDENCE: tid=[0-9]+ hart=[0-9]+' "${CLEAN_SMP2}" |
-        sed -E 's/.*hart=([0-9]+)/\1/' | sort -u | tr '\n' ' '
-)"
-wake_harts="$(
-    grep -oE 'M00_08_IPC_SEND_WAKE_EVIDENCE: tid=[0-9]+ hart=[0-9]+' "${CLEAN_SMP2}" |
-        sed -E 's/.*hart=([0-9]+)/\1/' | sort -u | tr '\n' ' '
-)"
-for hart_id in 0 1; do
-    if [[ "${block_harts} ${wake_harts}" != *"${hart_id}"* ]]; then
-        echo "M00-08.03.02 (smp2): hart ${hart_id} produced no block/wake evidence" >&2
-        exit 1
-    fi
-done
-echo "M00-08.03.02 (smp2): block harts [${block_harts}] wake harts [${wake_harts}]"
-
-# Cross-hart wake: at least one task must have blocked on one hart and been
-# woken from the other hart.
-grep -oE 'M00_08_IPC_RECV_BLOCK_EVIDENCE: tid=[0-9]+ hart=[0-9]+' "${CLEAN_SMP2}" |
-    sed -E 's/.*tid=([0-9]+) hart=([0-9]+)/\1 \2/' | sort -u >"${BUILD_PATH}/smp2-blocks.txt"
-grep -oE 'M00_08_IPC_SEND_WAKE_EVIDENCE: tid=[0-9]+ hart=[0-9]+' "${CLEAN_SMP2}" |
-    sed -E 's/.*tid=([0-9]+) hart=([0-9]+)/\1 \2/' | sort -u >"${BUILD_PATH}/smp2-wakes.txt"
-cross_hart_wakes="$(
-    join "${BUILD_PATH}/smp2-blocks.txt" "${BUILD_PATH}/smp2-wakes.txt" |
-        awk '$2 != $3 { print $1 }' | sort -u | wc -l
-)"
-if (( cross_hart_wakes < 1 )); then
-    echo "M00-08.03.02 (smp2): no cross-hart block/wake pair observed" >&2
-    exit 1
-fi
-echo "M00-08.03.02 (smp2): cross-hart woken tasks: ${cross_hart_wakes}"
+# SMP correctness is trace-authoritative. UART marker records are deliberately
+# not an oracle because production printk remains lock-free and concurrent
+# writers may interleave. The checker proves waiter FIFO, exactly-once wake,
+# result-before-READY publication, hart participation, and a cross-hart wake.
+python3 "${ROOT_DIR}/scripts/check-microkernel-trace.py" \
+    --expected-harts 2 \
+    --require-blocking-ipc \
+    --require-cross-hart-wake \
+    "${CLEAN_SMP2}"
 
 echo "M00-08.03.02 blocking IPC: PASS"

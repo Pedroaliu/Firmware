@@ -61,9 +61,10 @@ Endpoint (ipc_manager.cpp, private)
 
 Lock order, one direction only: `table_lock_ -> endpoint lock -> {runqueue lock,
 delay-queue lock}`. No TaskManager lock is ever taken inside an endpoint lock. Never
-two endpoint locks at once. `printk` is a leaf lock (console internals take no other
-locks), so it is safe from any context; M00-08.03.02 adds a per-call spinlock to
-`printk` because two harts now emit kernel markers concurrently.
+two endpoint locks at once. Production `printk` remains unchanged and lock-free at
+record level; concurrent UART text is therefore not a multi-hart correctness oracle.
+Verification uses the independent structured trace instead of adding a console lock
+whose interrupt/preemption recursion contract has not been designed.
 
 ### 3.1 Atomic blocking (recv, inside `endpoint.lock`)
 
@@ -115,17 +116,22 @@ A send consumes exactly one waiter or produces exactly one pending message — n
 
 ## 5. Acceptance mapping
 
-`scripts/test-m00-08-03-02-ipc-blocking-recv.sh` builds the
-`JIXIA_M00_08_03_02_PROBE` firmware once and boots it twice:
+`scripts/test-m00-08-03-02-ipc-blocking-recv.sh` builds the verification-only
+`jixia-verify.bin` image (`JIXIA_M00_08_03_02_PROBE=ON`,
+`JIXIA_VERIFICATION=ON`) and boots it twice. The normal build remains
+`jixia.bin`: it contains no trace storage, jitter hooks, checker logic or
+test-only wake counters, and the production IPC API does not expose verification
+outputs. This follows Hostboot's useful `hbicore.bin` / `hbicore_test.bin`
+separation while retaining one production implementation under test.
 
 - `--smp 1` deterministic run — required-marker + ordered-marker checks:
 
 | Case | Evidence |
 |---|---|
 | Generation ceiling / retirement probe (now snapshotting waiting-FIFO state too) | `M00_08_IPC_GENERATION_CEILING` -> `M00_08_IPC_SLOT_RETIREMENT` |
-| C02 recv-before-send | `M00_08_IPC_C02_RECV_BLOCKED` (kernel block LP) -> `M00_08_IPC_C02_SEND_WOKE` (kernel wake LP) -> `M00_08_IPC_C02_WOKE_DELIVERED` (U-mode receiver verified full payload + sender), with per-event evidence lines `M00_08_IPC_RECV_BLOCK_EVIDENCE` / `M00_08_IPC_SEND_WAKE_EVIDENCE` |
+| C02 recv-before-send | `M00_08_IPC_C02_WOKE_DELIVERED` (U-mode receiver verified full payload + sender); structured events prove wait-enqueue -> send-wake -> result-publish -> READY |
 | C05 two-receiver FIFO pairing | `M00_08_IPC_C05_M1_TO_R1` -> `M00_08_IPC_C05_M2_TO_R2` (each receiver verified its own payload), then `M00_08_IPC_C05_THIRD_PENDING` (a third send pends — no phantom waiter double-wake) |
-| C12 destroy of a blocked receiver | `M00_08_IPC_C12_DESTROY_WOKE` -> `M00_08_IPC_C12_STALE_HANDLE` (old handle send/try_recv `-EINVAL`) -> `M00_08_IPC_C12_EIDRM` (receiver resumed with `-EIDRM`) |
+| C12 destroy of a blocked receiver | structured destroy-wake/result/READY history, plus `M00_08_IPC_C12_STALE_HANDLE` (old handle send/try_recv `-EINVAL`) -> `M00_08_IPC_C12_EIDRM` (receiver resumed with `-EIDRM`) |
 | C13a timer preemption while blocked | `M00_08_IPC_C13A_PREEMPT_WHILE_BLOCKED` (mtime preempted a CPU-bound task while a receiver stayed blocked) -> `M00_08_IPC_C13A_RESUMED` (receiver resumed only after the send) |
 | C19 drained endpoint + reserved ABI | `M00_08_IPC_C19_DRAINED_EAGAIN`, `M00_08_IPC_CALL_REPLY_ENOSYS` |
 | Summary | `M00_08_IPC_BLOCKING_RECV` (init returns `0x0804CAFE` after the full scenario) |
@@ -136,10 +142,14 @@ A send consumes exactly one waiter or produces exactly one pending message — n
 
 | Requirement | Evidence |
 |---|---|
-| Both harts participate in block/wake traffic | evidence lines parsed by the script; hart set must contain both 0 and 1 |
-| A block on one hart woken from the other hart | script correlates per-task tid in block vs. wake evidence lines; at least one differing-hart wake required |
-| Every blocked receiver woken exactly once | `M00_08_IPC_C19_SUMMARY: blocks=N send_wakes=M destroy_wakes=K` with `N == M + K` |
+| Both harts participate in block/wake traffic | overflow-free per-hart trace; checker requires both expected harts |
+| A block on one hart woken from the other hart | checker correlates waiter TaskId and requires at least one differing-hart wake |
+| Every blocked receiver woken exactly once | checker reconstructs each endpoint waiter FIFO and requires one wake, one result publication and one later READY publication per waiter, with none left pending |
 | C19 workload correctness under any interleaving | `M00_08_IPC_C19_SENDER_DONE`, `M00_08_IPC_C19_RECEIVER_DONE`, `M00_08_IPC_C19_DRAINED_EAGAIN` |
+
+The trace checker is a separate hosted tool; the firmware records facts but never
+prints a self-certified concurrency conclusion. Marker lines remain useful for
+single-hart workload assertions, not as the SMP history oracle.
 
 M00-08.01, M00-08.02, and M00-08.03.01 regressions remain required and green in CI
 (the .03.01 script proves C01/C03/C14/C14b/C15/C16 unchanged).

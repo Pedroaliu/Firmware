@@ -2,6 +2,45 @@
 
 #include "microkernel/core/hart.h"
 #include "microkernel/core/scheduler.h"
+#ifndef JIXIA_HOST_IPC_TORTURE
+#include "microkernel/core/task.h"
+#else
+/*
+ * The hosted torture lane never enters blocking recv/wake. It still compiles
+ * the production EndpointManager translation unit, so provide only the Task
+ * surface needed to type-check those fail-closed paths without importing the
+ * target-only RISC-V context headers into an x86 sanitizer binary.
+ */
+namespace jixia::microkernel::task {
+
+enum class TaskState : uint8_t {
+    blocked_message = 'M',
+};
+
+struct Task;
+
+struct MessageWaitNode {
+    Task* previous;
+    Task* next;
+    bool queued;
+};
+
+struct HostedTaskContext {
+    uintptr_t x[32];
+};
+
+struct Task {
+    hart::HartLocal* cpu;
+    HostedTaskContext context;
+    TaskId tid;
+    TaskState state;
+    void* state_info;
+    MessageWaitNode message_wait;
+};
+
+} // namespace jixia::microkernel::task
+#endif
+#include "microkernel/verify/trace.h"
 
 namespace jixia::microkernel::ipc {
 namespace {
@@ -10,12 +49,10 @@ namespace {
     hart::park();
 }
 
-/*
- * Global count of tasks queued in endpoint waiting FIFOs. Updated with
- * atomics under the owning endpoint lock; read by probe-only diagnostics from
- * any context (the value is exact only as a monotonic witness).
- */
+#ifdef JIXIA_M00_08_03_02_PROBE
+/* Verification-image-only witness for the C13a preemption workload. */
 uint32_t g_blocked_receivers = 0U;
+#endif
 
 } // namespace
 
@@ -96,12 +133,17 @@ void EndpointManager::clear_queue(Endpoint& endpoint) {
 }
 
 intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_create_begin, 0U, owner, 0U, 0U);
     if (handle_out == nullptr) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_create_reject, operation, 0U, owner,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Lock order: table lock -> endpoint lock (never the reverse). */
     SpinlockGuard table_guard(table_lock_);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_create_table_locked, operation, 0U,
+                            verify::lock_endpoint_table);
     for (size_t index = 0U; index < kMaxEndpoints; ++index) {
         /* A retired slot is allocated forever: its epoch space is exhausted. */
         if (slot_allocated_[index] || endpoints_[index].retired) {
@@ -132,21 +174,27 @@ intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
             endpoint.generation = 1U;
         }
 
-        *handle_out = EndpointHandle{static_cast<uint32_t>(index), endpoint.generation}.raw();
+        const uint64_t handle =
+            EndpointHandle{static_cast<uint32_t>(index), endpoint.generation}.raw();
+        *handle_out = handle;
+        JIXIA_VERIFY_POINT(verify::Event::ipc_create_publish, operation, handle, owner,
+                           endpoint.generation, endpoint.count,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return 0;
     }
 
+    JIXIA_VERIFY_POINT(verify::Event::ipc_create_reject, operation, 0U, owner,
+                       static_cast<uint64_t>(kErrorNoSpace), 0U, verify::lock_endpoint_table);
     return kErrorNoSpace;
 }
 
-intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle,
-                                           size_t* woken_receivers) {
-    if (woken_receivers != nullptr) {
-        *woken_receivers = 0U;
-    }
+intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_destroy_begin, handle, caller, 0U, 0U);
 
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
@@ -154,13 +202,21 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle,
     SpinlockGuard table_guard(table_lock_);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_destroy_locked, operation, handle,
+                            verify::lock_endpoint_table | verify::lock_endpoint);
 
     if (!slot_allocated_[parsed.index] || !endpoint.active ||
         (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
     if (endpoint.owner != caller) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_reject, operation, handle, caller,
+                           static_cast<uint64_t>(kErrorAccess), endpoint.owner,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
         return kErrorAccess;
     }
 
@@ -182,6 +238,10 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle,
         endpoint.generation += 1U;
         slot_allocated_[parsed.index] = false;
     }
+    JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_dead, operation, handle, caller,
+                       endpoint.generation, endpoint.retired ? 1U : 0U,
+                       verify::lock_endpoint_table | verify::lock_endpoint);
+
 
     /*
      * M00-08.03.02: wake every blocked receiver exactly once with -EIDRM.
@@ -191,39 +251,52 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle,
      * fails closed rather than masquerading as -EAGAIN. Old-handle operations
      * after this point fail with -EINVAL through the generation check above.
      */
-    size_t woken = 0U;
     while (task::Task* receiver = waiter_pop(endpoint)) {
+        [[maybe_unused]] const TaskId receiver_tid = receiver->tid;
+        JIXIA_VERIFY_TEST_POINT(verify::TestPoint::wake_popped, operation, handle,
+                                verify::lock_endpoint_table | verify::lock_endpoint);
         receiver->state_info = nullptr;
         receiver->context.x[10] = static_cast<uintptr_t>(kErrorIdrm);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_destroy_wake, operation, handle, receiver_tid,
+                           static_cast<uint64_t>(kErrorIdrm), endpoint.waiting_count,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_result_publish, operation, handle, receiver_tid,
+                           static_cast<uint64_t>(kErrorIdrm), 0U,
+                           verify::lock_endpoint_table | verify::lock_endpoint);
+        JIXIA_VERIFY_TEST_POINT(verify::TestPoint::before_ready_publish, operation, handle,
+                                verify::lock_endpoint_table | verify::lock_endpoint);
+#ifdef JIXIA_M00_08_03_02_PROBE
+        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+#endif
         if (!receiver->cpu->scheduler->add_task(*receiver)) {
             fail_closed();
         }
-        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
-        woken += 1U;
-    }
-
-    if (woken_receivers != nullptr) {
-        *woken_receivers = woken;
     }
     return 0;
 }
 
-intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4],
-                               TaskId* woken_receiver) {
-    if (woken_receiver != nullptr) {
-        *woken_receiver = 0U;
-    }
+intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4]) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_send_begin, handle, sender, words[0], 0U);
 
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Single endpoint lock only: no table or task-manager locks here. */
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_send_before_lock, operation, handle,
+                            verify::lock_none);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_send_locked, operation, handle,
+                            verify::lock_endpoint);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
@@ -239,21 +312,31 @@ intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&
          * broken invariant and fails closed.
          */
         task::Task* receiver = waiter_pop(endpoint);
+        [[maybe_unused]] const TaskId receiver_tid = receiver->tid;
+        JIXIA_VERIFY_TEST_POINT(verify::TestPoint::wake_popped, operation, handle,
+                                verify::lock_endpoint);
         const Message message{sender, {words[0], words[1], words[2], words[3]}};
         write_recv_registers(*receiver, 0, message);
         receiver->state_info = nullptr;
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_wake, operation, handle, receiver_tid, words[0],
+                           endpoint.waiting_count, verify::lock_endpoint);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_result_publish, operation, handle, receiver_tid,
+                           0U, sender, verify::lock_endpoint);
+        JIXIA_VERIFY_TEST_POINT(verify::TestPoint::before_ready_publish, operation, handle,
+                                verify::lock_endpoint);
+#ifdef JIXIA_M00_08_03_02_PROBE
+        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+#endif
         if (!receiver->cpu->scheduler->add_task(*receiver)) {
             fail_closed();
-        }
-        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
-
-        if (woken_receiver != nullptr) {
-            *woken_receiver = receiver->tid;
         }
         return 0;
     }
 
     if (endpoint.count >= kEndpointQueueDepth) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_send_reject, operation, handle, sender,
+                           static_cast<uint64_t>(kErrorAgain), endpoint.count,
+                           verify::lock_endpoint);
         return kErrorAgain;
     }
 
@@ -264,24 +347,38 @@ intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&
     slot.words[2] = words[2];
     slot.words[3] = words[3];
     endpoint.count += 1U;
+    JIXIA_VERIFY_POINT(verify::Event::ipc_send_enqueue, operation, handle, sender, words[0],
+                       endpoint.count, verify::lock_endpoint);
     return 0;
 }
 
 intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_recv_begin, handle, 0U, 0U, 0U);
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed) || (message_out == nullptr)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return kErrorInvalidArgument;
     }
 
     /* Single endpoint lock only: no table, task, or time locks here. */
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_before_lock, operation, handle,
+                            verify::lock_none);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_locked, operation, handle,
+                            verify::lock_endpoint);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint);
         return kErrorInvalidArgument;
     }
 
     if (endpoint.count == 0U) {
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, 0U,
+                           static_cast<uint64_t>(kErrorAgain), 0U, verify::lock_endpoint);
         return kErrorAgain;
     }
 
@@ -295,10 +392,13 @@ intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
     endpoint.queue[endpoint.head] = {};
     endpoint.head = (endpoint.head + 1U) % kEndpointQueueDepth;
     endpoint.count -= 1U;
+    JIXIA_VERIFY_POINT(verify::Event::ipc_recv_dequeue, operation, handle, message_out->sender,
+                       message_out->words[0], endpoint.count, verify::lock_endpoint);
     return 0;
 }
 
 RecvResult EndpointManager::recv(task::Task& caller, uint64_t handle) {
+    JIXIA_VERIFY_OPERATION(operation, verify::Event::ipc_recv_begin, handle, caller.tid, 0U, 0U);
     /*
      * A task already queued in a waiting FIFO cannot issue a syscall; reaching
      * this check with it set means kernel state corruption.
@@ -311,15 +411,24 @@ RecvResult EndpointManager::recv(task::Task& caller, uint64_t handle) {
     if (!handle_well_formed(parsed)) {
         /* Rejected paths write the caller's a0 directly: it is still current. */
         caller.context.x[10] = static_cast<uintptr_t>(kErrorInvalidArgument);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, caller.tid,
+                           static_cast<uint64_t>(kErrorInvalidArgument), 0U, verify::lock_none);
         return RecvResult{RecvStatus::rejected, {}, kErrorInvalidArgument};
     }
 
     /* Single endpoint lock only: no table or task-manager locks here. */
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_before_lock, operation, handle,
+                            verify::lock_none);
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::ipc_recv_locked, operation, handle,
+                            verify::lock_endpoint);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
         caller.context.x[10] = static_cast<uintptr_t>(kErrorInvalidArgument);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_reject, operation, handle, caller.tid,
+                           static_cast<uint64_t>(kErrorInvalidArgument), endpoint.generation,
+                           verify::lock_endpoint);
         return RecvResult{RecvStatus::rejected, {}, kErrorInvalidArgument};
     }
 
@@ -332,6 +441,8 @@ RecvResult EndpointManager::recv(task::Task& caller, uint64_t handle) {
         endpoint.head = (endpoint.head + 1U) % kEndpointQueueDepth;
         endpoint.count -= 1U;
         write_recv_registers(caller, 0, message);
+        JIXIA_VERIFY_POINT(verify::Event::ipc_recv_dequeue, operation, handle, message.sender,
+                           message.words[0], endpoint.count, verify::lock_endpoint);
         return RecvResult{RecvStatus::delivered, message, 0};
     }
 
@@ -345,7 +456,16 @@ RecvResult EndpointManager::recv(task::Task& caller, uint64_t handle) {
     waiter_push(endpoint, caller);
     caller.state = task::TaskState::blocked_message;
     caller.state_info = reinterpret_cast<void*>(handle);
+#ifdef JIXIA_M00_08_03_02_PROBE
     __atomic_add_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+#endif
+    JIXIA_VERIFY_POINT(verify::Event::ipc_recv_wait_enqueue, operation, handle, caller.tid,
+                       static_cast<uint64_t>(caller.state), endpoint.waiting_count,
+                       verify::lock_endpoint);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::wait_enqueued, operation, handle,
+                            verify::lock_endpoint);
+    JIXIA_VERIFY_TEST_POINT(verify::TestPoint::before_current_relinquish, operation, handle,
+                            verify::lock_endpoint);
     (void)caller.cpu->scheduler->set_next_runnable();
 
     /*

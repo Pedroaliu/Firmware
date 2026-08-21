@@ -68,6 +68,32 @@ option(
     OFF
 )
 
+option(
+    JIXIA_VERIFICATION
+    "Compile verification-only trace and deterministic test-point hooks"
+    OFF
+)
+
+option(
+    JIXIA_VERIFICATION_JITTER
+    "Inject bounded deterministic delay at verification test points"
+    OFF
+)
+
+set(
+    JIXIA_VERIFICATION_SEED
+    "1"
+    CACHE STRING
+    "Unsigned deterministic verification seed"
+)
+
+set(
+    JIXIA_VERIFICATION_TRACE_RECORDS
+    "1024"
+    CACHE STRING
+    "Fixed trace records retained per hart in verification builds"
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -280,6 +306,49 @@ if(JIXIA_M00_08_03_02_PROBE)
     )
 endif()
 
+if(JIXIA_VERIFICATION)
+    if(NOT JIXIA_VERIFICATION_SEED MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "JIXIA_VERIFICATION_SEED must be an unsigned integer")
+    endif()
+    if(NOT JIXIA_VERIFICATION_TRACE_RECORDS MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR "JIXIA_VERIFICATION_TRACE_RECORDS must be a positive integer")
+    endif()
+
+    target_sources(
+        jixia.elf
+        PRIVATE
+            microkernel/verify/trace.cpp
+    )
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_VERIFICATION=1
+            JIXIA_VERIFICATION_SEED=${JIXIA_VERIFICATION_SEED}ULL
+            JIXIA_VERIFICATION_TRACE_RECORDS=${JIXIA_VERIFICATION_TRACE_RECORDS}U
+    )
+
+    if(JIXIA_VERIFICATION_JITTER)
+        target_compile_definitions(
+            jixia.elf
+            PRIVATE
+                JIXIA_VERIFICATION_JITTER=1
+        )
+    endif()
+elseif(JIXIA_VERIFICATION_JITTER)
+    message(FATAL_ERROR "JIXIA_VERIFICATION_JITTER requires JIXIA_VERIFICATION")
+endif()
+
+# Verification is a distinct firmware artifact, following Hostboot's
+# production-image/test-image split. The logical CMake target remains stable
+# for existing scripts, but a verification build can never overwrite or be
+# mistaken for the production jixia.elf/jixia.bin artifacts.
+if(JIXIA_VERIFICATION)
+    set(JIXIA_FIRMWARE_BASENAME "jixia-verify")
+    set_target_properties(jixia.elf PROPERTIES OUTPUT_NAME "jixia-verify.elf")
+else()
+    set(JIXIA_FIRMWARE_BASENAME "jixia")
+endif()
+
 target_compile_options(
     jixia.elf
     PRIVATE
@@ -313,7 +382,7 @@ target_link_options(
 
         -Wl,--gc-sections
         -Wl,--build-id=none
-        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/jixia.map
+        -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.map
 
         -T${JIXIA_LINKER_SCRIPT}
 )
@@ -334,7 +403,7 @@ add_custom_command(
         ${JIXIA_OBJCOPY}
         -O binary
         $<TARGET_FILE:jixia.elf>
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.bin
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.bin
 
     COMMAND
         ${JIXIA_OBJDUMP}
@@ -342,14 +411,14 @@ add_custom_command(
         -S
         $<TARGET_FILE:jixia.elf>
         >
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.dis
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.dis
 
     COMMAND
         ${JIXIA_READELF}
         -a
         $<TARGET_FILE:jixia.elf>
         >
-        ${CMAKE_CURRENT_BINARY_DIR}/jixia.readelf
+        ${CMAKE_CURRENT_BINARY_DIR}/${JIXIA_FIRMWARE_BASENAME}.readelf
 
     COMMENT "Generating Jixia firmware image and inspection files"
 )
