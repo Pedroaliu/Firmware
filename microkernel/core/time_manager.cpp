@@ -4,6 +4,7 @@
 
 #include "microkernel/console/printk.h"
 #include "microkernel/core/hart.h"
+#include "microkernel/core/ipc_manager.h"
 #include "microkernel/core/scheduler.h"
 #include "microkernel/core/singleton.h"
 #include "microkernel/core/task.h"
@@ -21,6 +22,10 @@ bool g_sleep_wake_reported = false;
 bool g_sleep_constants_reported = false;
 uint64_t g_sleep_entry_time = 0U;
 uint64_t g_sleep_duration_ticks = 0U;
+#endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+bool g_ipc_c13a_preempt_reported = false;
 #endif
 
 [[noreturn]] void fail_closed() {
@@ -274,6 +279,20 @@ void TimeManager::handle_timer_interrupt(jixia::arch::riscv::TrapFrame& frame) {
 #ifdef JIXIA_M00_08_02_PROBE
         if (local.scheduler_preemption_count == 1U) {
             printk("M00_08_TIMER_PREEMPT: PASS\n");
+        }
+#endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+        /*
+         * C13a evidence: the timer preempted a CPU-bound task while at least
+         * one receiver stayed blocked in an endpoint waiting FIFO — scheduler
+         * activity and blocked-message coexistence. The receiver is woken
+         * strictly later (send wake), never by this preemption.
+         */
+        if (!g_ipc_c13a_preempt_reported &&
+            (ipc::EndpointManager::debug_blocked_receiver_count() != 0U)) {
+            printk("M00_08_IPC_C13A_PREEMPT_WHILE_BLOCKED: PASS\n");
+            g_ipc_c13a_preempt_reported = true;
         }
 #endif
     }

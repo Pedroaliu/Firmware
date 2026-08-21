@@ -841,3 +841,652 @@ jixia_user_ipc_nonowner_child:
 .size jixia_user_ipc_nonowner_child, . - jixia_user_ipc_nonowner_child
 
 #endif
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+
+/*
+ * M00-08.03.02 blocking-recv acceptance:
+ *
+ *   C02   recv-before-send: receiver blocks first, then the send wakes it
+ *   C05   two-receiver FIFO: M1 -> R1, M2 -> R2, exactly once each; a third
+ *         send must pend (no phantom waiter)
+ *   C12   destroy while blocked: recv returns -EIDRM; the old handle then
+ *         fails closed with -EINVAL on send and try_recv
+ *   C13a  receiver stays blocked across timer preemption of a CPU-bound task
+ *   C19   64-round sender/receiver stress (lost-wakeup / double-wakeup probe)
+ *   9/12  reserved numbers still return -ENOSYS
+ *
+ * On --smp 1 every handshake is deterministic (create order + blocking
+ * syscalls); on --smp 2 the same workload tolerates any interleaving.
+ */
+.balign 4
+.global jixia_user_ipc_blocking_init_task
+.type jixia_user_ipc_blocking_init_task, @function
+
+jixia_user_ipc_blocking_init_task:
+    addi sp, sp, -64
+    sd ra, 56(sp)
+    sd s0, 48(sp)
+    sd s1, 40(sp)
+    sd s2, 32(sp)
+    sd s3, 24(sp)
+
+    /* C13a hog handshake word at 0(sp); starts clear. */
+    sd zero, 0(sp)
+    mv s3, sp
+
+    /* C02: endpoint, receiver child, then a yield so the recv blocks first. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s0, a0
+
+    la a0, jixia_user_ipc_c02_receiver_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s1, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C02_W0
+    li a2, JIXIA_M00_08_IPC_WORD_C02_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C02_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C02_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* C05: two receivers block in FIFO order (R1 first), then M1/M2/M3. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s0, a0
+
+    la a0, jixia_user_ipc_c05_r1_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s1, a0
+
+    la a0, jixia_user_ipc_c05_r2_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s2, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C05_M1
+    li a2, JIXIA_M00_08_IPC_WORD_C05_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C05_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C05_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C05_M2
+    li a2, JIXIA_M00_08_IPC_WORD_C05_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C05_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C05_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* No waiter remains: the third message must pend for try_recv. */
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C05_M3
+    li a2, JIXIA_M00_08_IPC_WORD_C05_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C05_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C05_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    bnez a0, .Lipc_blocking_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_M3
+    bne a1, t0, .Lipc_blocking_failure
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_blocking_failure
+
+    mv a0, s2
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s2, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* C12: receiver blocks, then the owner destroys the endpoint. */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s0, a0
+
+    la a0, jixia_user_ipc_c12_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s1, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    /* Destroy while blocked: the recv must resume with -EIDRM. */
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* The old handle now fails closed with -EINVAL on every operation. */
+    mv a0, s0
+    li a1, 0
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -22
+    bne a0, t0, .Lipc_blocking_failure
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_blocking_failure
+
+    /*
+     * C13a: the receiver is created before the hog so the yield runs the
+     * blocking recv first; the hog then spins until mtime preempts it, which
+     * is the only way init can resume (C13a evidence). Init wakes the
+     * receiver and releases the hog afterwards.
+     */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s0, a0
+
+    la a0, jixia_user_ipc_c13a_receiver_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s1, a0
+
+    la a0, jixia_user_ipc_c13a_hog_child
+    mv a1, s3
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s2, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s0
+    li a1, JIXIA_M00_08_IPC_WORD_C13A
+    li a2, 0
+    li a3, 0
+    li a4, 0
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* Release the hog strictly after the wake: it was preempted, not ended. */
+    li t0, 1
+    sd t0, 0(s3)
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_blocking_failure
+
+    mv a0, s2
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s2, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /*
+     * C19: 64 stress rounds. The sender retries -EAGAIN (queue full) until
+     * the receiver drains; the receiver checks every round's value in order,
+     * so a lost wake hangs the boot and a double wake shifts the values.
+     */
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s0, a0
+
+    la a0, jixia_user_ipc_c19_sender_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s1, a0
+
+    la a0, jixia_user_ipc_c19_receiver_child
+    mv a1, s0
+    li a7, JIXIA_TASK_SYSCALL_CREATE
+    ecall
+    bltz a0, .Lipc_blocking_failure
+    mv s2, a0
+
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+
+    mv a0, s1
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s1, .Lipc_blocking_failure
+
+    mv a0, s2
+    li a1, 0
+    li a2, 0
+    li a7, JIXIA_TASK_SYSCALL_WAIT
+    ecall
+    bne a0, s2, .Lipc_blocking_failure
+
+    /* Both children done: the endpoint must be fully drained (-EAGAIN). */
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_TRY_RECV
+    ecall
+    li t0, -11
+    bne a0, t0, .Lipc_blocking_failure
+
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_ENDPOINT_DESTROY
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    /* Reserved numbers 9 and 12 still fail closed with -ENOSYS. */
+    li a7, JIXIA_TASK_SYSCALL_CALL
+    ecall
+    li t0, -38
+    bne a0, t0, .Lipc_blocking_failure
+
+    li a7, JIXIA_TASK_SYSCALL_REPLY
+    ecall
+    li t0, -38
+    bne a0, t0, .Lipc_blocking_failure
+
+    li a7, JIXIA_TASK_SYSCALL_DETACH
+    ecall
+    bnez a0, .Lipc_blocking_failure
+
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_RESULT
+    j .Lipc_blocking_return
+
+.Lipc_blocking_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_blocking_return:
+    ld s3, 24(sp)
+    ld s2, 32(sp)
+    ld s1, 40(sp)
+    ld s0, 48(sp)
+    ld ra, 56(sp)
+    addi sp, sp, 64
+    ret
+
+.size jixia_user_ipc_blocking_init_task, . - jixia_user_ipc_blocking_init_task
+
+/*
+ * C02 receiver: blocks on the empty endpoint, resumes only through the wake
+ * path, and verifies the full a0..a5 register ABI including a nonzero sender.
+ */
+.balign 4
+.global jixia_user_ipc_c02_receiver_child
+.type jixia_user_ipc_c02_receiver_child, @function
+
+jixia_user_ipc_c02_receiver_child:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    sd s0, 0(sp)
+    mv s0, a0
+
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    bnez a0, .Lipc_c02_child_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C02_W0
+    bne a1, t0, .Lipc_c02_child_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C02_W1
+    bne a2, t0, .Lipc_c02_child_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C02_W2
+    bne a3, t0, .Lipc_c02_child_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C02_W3
+    bne a4, t0, .Lipc_c02_child_failure
+    beqz a5, .Lipc_c02_child_failure
+
+    li a0, JIXIA_M00_08_IPC_C02_CHILD_RESULT
+    j .Lipc_c02_child_return
+
+.Lipc_c02_child_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c02_child_return:
+    ld s0, 0(sp)
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+
+.size jixia_user_ipc_c02_receiver_child, . - jixia_user_ipc_c02_receiver_child
+
+/*
+ * C05 receivers: each blocks on the shared endpoint and must wake with its
+ * own first word; the shared w1..w3 prove the remaining ABI registers.
+ */
+.balign 4
+.global jixia_user_ipc_c05_r1_child
+.type jixia_user_ipc_c05_r1_child, @function
+
+jixia_user_ipc_c05_r1_child:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    sd s0, 0(sp)
+    mv s0, a0
+
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    bnez a0, .Lipc_c05_r1_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_M1
+    bne a1, t0, .Lipc_c05_r1_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W1
+    bne a2, t0, .Lipc_c05_r1_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W2
+    bne a3, t0, .Lipc_c05_r1_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W3
+    bne a4, t0, .Lipc_c05_r1_failure
+    beqz a5, .Lipc_c05_r1_failure
+
+    li a0, JIXIA_M00_08_IPC_C05_R1_CHILD_RESULT
+    j .Lipc_c05_r1_return
+
+.Lipc_c05_r1_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c05_r1_return:
+    ld s0, 0(sp)
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+
+.size jixia_user_ipc_c05_r1_child, . - jixia_user_ipc_c05_r1_child
+
+.balign 4
+.global jixia_user_ipc_c05_r2_child
+.type jixia_user_ipc_c05_r2_child, @function
+
+jixia_user_ipc_c05_r2_child:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    sd s0, 0(sp)
+    mv s0, a0
+
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    bnez a0, .Lipc_c05_r2_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_M2
+    bne a1, t0, .Lipc_c05_r2_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W1
+    bne a2, t0, .Lipc_c05_r2_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W2
+    bne a3, t0, .Lipc_c05_r2_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C05_W3
+    bne a4, t0, .Lipc_c05_r2_failure
+    beqz a5, .Lipc_c05_r2_failure
+
+    li a0, JIXIA_M00_08_IPC_C05_R2_CHILD_RESULT
+    j .Lipc_c05_r2_return
+
+.Lipc_c05_r2_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c05_r2_return:
+    ld s0, 0(sp)
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+
+.size jixia_user_ipc_c05_r2_child, . - jixia_user_ipc_c05_r2_child
+
+/* C12 receiver: the destroy while blocked must resume this recv with -EIDRM. */
+.balign 4
+.global jixia_user_ipc_c12_child
+.type jixia_user_ipc_c12_child, @function
+
+jixia_user_ipc_c12_child:
+    /* a0 = endpoint handle; no frame needed for this single-syscall child. */
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    li t0, -43
+    bne a0, t0, .Lipc_c12_child_failure
+    li a0, JIXIA_M00_08_IPC_C12_CHILD_RESULT
+    ret
+
+.Lipc_c12_child_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+    ret
+
+.size jixia_user_ipc_c12_child, . - jixia_user_ipc_c12_child
+
+/*
+ * C13a receiver: blocks while the hog occupies the hart; resumes only after
+ * the preemption evidence and the init-task send.
+ */
+.balign 4
+.global jixia_user_ipc_c13a_receiver_child
+.type jixia_user_ipc_c13a_receiver_child, @function
+
+jixia_user_ipc_c13a_receiver_child:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    sd s0, 0(sp)
+    mv s0, a0
+
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    bnez a0, .Lipc_c13a_child_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C13A
+    bne a1, t0, .Lipc_c13a_child_failure
+    beqz a5, .Lipc_c13a_child_failure
+
+    li a0, JIXIA_M00_08_IPC_C13A_CHILD_RESULT
+    j .Lipc_c13a_child_return
+
+.Lipc_c13a_child_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c13a_child_return:
+    ld s0, 0(sp)
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+
+.size jixia_user_ipc_c13a_receiver_child, . - jixia_user_ipc_c13a_receiver_child
+
+/*
+ * C13a hog: CPU-bound on the shared handshake word. Only mtime can move it
+ * (init runs just after the preemption), and only init's post-wake store
+ * ends it — proving the receiver stayed blocked across the preemption.
+ */
+.balign 4
+.global jixia_user_ipc_c13a_hog_child
+.type jixia_user_ipc_c13a_hog_child, @function
+
+jixia_user_ipc_c13a_hog_child:
+.Lipc_c13a_hog_loop:
+    ld t0, 0(a0)
+    beqz t0, .Lipc_c13a_hog_loop
+    li a0, JIXIA_M00_08_IPC_C13A_HOG_CHILD_RESULT
+    ret
+
+.size jixia_user_ipc_c13a_hog_child, . - jixia_user_ipc_c13a_hog_child
+
+/*
+ * C19 sender: 64 rounds; retries -EAGAIN while the pending FIFO is full.
+ */
+.balign 4
+.global jixia_user_ipc_c19_sender_child
+.type jixia_user_ipc_c19_sender_child, @function
+
+jixia_user_ipc_c19_sender_child:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    sd s0, 16(sp)
+    sd s1, 8(sp)
+    mv s0, a0
+    li s1, 0
+    li t3, 64
+
+.Lipc_c19_sender_round:
+    bge s1, t3, .Lipc_c19_sender_done
+.Lipc_c19_sender_retry:
+    mv a0, s0
+    mv a1, s1
+    li a2, JIXIA_M00_08_IPC_WORD_C19_W1
+    li a3, JIXIA_M00_08_IPC_WORD_C19_W2
+    li a4, JIXIA_M00_08_IPC_WORD_C19_W3
+    li a7, JIXIA_TASK_SYSCALL_SEND
+    ecall
+    li t0, -11
+    beq a0, t0, .Lipc_c19_sender_retry
+    bnez a0, .Lipc_c19_sender_failure
+    /*
+     * Yield per round so the receiver can catch up and block: each round then
+     * alternates pending-delivery and wake paths (lost-wakeup probe) instead
+     * of the sender permanently outrunning the receiver.
+     */
+    li a7, JIXIA_TASK_SYSCALL_YIELD
+    ecall
+    addi s1, s1, 1
+    j .Lipc_c19_sender_round
+
+.Lipc_c19_sender_done:
+    li a0, JIXIA_M00_08_IPC_C19_SENDER_CHILD_RESULT
+    j .Lipc_c19_sender_return
+
+.Lipc_c19_sender_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c19_sender_return:
+    ld s1, 8(sp)
+    ld s0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+
+.size jixia_user_ipc_c19_sender_child, . - jixia_user_ipc_c19_sender_child
+
+/*
+ * C19 receiver: 64 rounds. Word0 must equal the round index every time (a
+ * double wake shifts values; a lost wake hangs) and the sender TaskId must
+ * stay stable and nonzero across the whole stress loop.
+ */
+.balign 4
+.global jixia_user_ipc_c19_receiver_child
+.type jixia_user_ipc_c19_receiver_child, @function
+
+jixia_user_ipc_c19_receiver_child:
+    addi sp, sp, -48
+    sd ra, 40(sp)
+    sd s0, 32(sp)
+    sd s1, 24(sp)
+    sd s2, 16(sp)
+    mv s0, a0
+    li s1, 0
+    li t3, 64
+    li s2, 0
+
+.Lipc_c19_receiver_round:
+    bge s1, t3, .Lipc_c19_receiver_done
+    mv a0, s0
+    li a7, JIXIA_TASK_SYSCALL_RECV
+    ecall
+    bnez a0, .Lipc_c19_receiver_failure
+    bne a1, s1, .Lipc_c19_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C19_W1
+    bne a2, t0, .Lipc_c19_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C19_W2
+    bne a3, t0, .Lipc_c19_receiver_failure
+    li t0, JIXIA_M00_08_IPC_WORD_C19_W3
+    bne a4, t0, .Lipc_c19_receiver_failure
+    beqz a5, .Lipc_c19_receiver_failure
+    beqz s2, .Lipc_c19_receiver_memo
+    bne a5, s2, .Lipc_c19_receiver_failure
+    j .Lipc_c19_receiver_next
+
+.Lipc_c19_receiver_memo:
+    mv s2, a5
+
+.Lipc_c19_receiver_next:
+    addi s1, s1, 1
+    j .Lipc_c19_receiver_round
+
+.Lipc_c19_receiver_done:
+    li a0, JIXIA_M00_08_IPC_C19_RECEIVER_CHILD_RESULT
+    j .Lipc_c19_receiver_return
+
+.Lipc_c19_receiver_failure:
+    li a0, JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE
+
+.Lipc_c19_receiver_return:
+    ld s2, 16(sp)
+    ld s1, 24(sp)
+    ld s0, 32(sp)
+    ld ra, 40(sp)
+    addi sp, sp, 48
+    ret
+
+.size jixia_user_ipc_c19_receiver_child, . - jixia_user_ipc_c19_receiver_child
+
+#endif

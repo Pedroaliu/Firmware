@@ -1,6 +1,81 @@
 #include "microkernel/core/ipc_manager.h"
 
+#include "microkernel/core/hart.h"
+#include "microkernel/core/scheduler.h"
+
 namespace jixia::microkernel::ipc {
+namespace {
+
+[[noreturn]] void fail_closed() {
+    hart::park();
+}
+
+/*
+ * Global count of tasks queued in endpoint waiting FIFOs. Updated with
+ * atomics under the owning endpoint lock; read by probe-only diagnostics from
+ * any context (the value is exact only as a monotonic witness).
+ */
+uint32_t g_blocked_receivers = 0U;
+
+} // namespace
+
+/* Caller must hold endpoint.lock. */
+void EndpointManager::check_endpoint_invariant(const Endpoint& endpoint) {
+    if ((endpoint.waiting_count > 0U) && (endpoint.count > 0U)) {
+        /* Waiting receivers and pending messages are never both non-empty. */
+        fail_closed();
+    }
+}
+
+/* Caller must hold endpoint.lock. */
+void EndpointManager::waiter_push(Endpoint& endpoint, task::Task& waiter) {
+    waiter.message_wait.previous = endpoint.waiting_tail;
+    waiter.message_wait.next = nullptr;
+    if (endpoint.waiting_tail != nullptr) {
+        endpoint.waiting_tail->message_wait.next = &waiter;
+    } else {
+        endpoint.waiting_head = &waiter;
+    }
+    endpoint.waiting_tail = &waiter;
+    waiter.message_wait.queued = true;
+    endpoint.waiting_count += 1U;
+}
+
+/* Caller must hold endpoint.lock. Unlinks and clears the membership flags. */
+task::Task* EndpointManager::waiter_pop(Endpoint& endpoint) {
+    task::Task* waiter = endpoint.waiting_head;
+    if (waiter == nullptr) {
+        return nullptr;
+    }
+
+    endpoint.waiting_head = waiter->message_wait.next;
+    if (endpoint.waiting_head != nullptr) {
+        endpoint.waiting_head->message_wait.previous = nullptr;
+    } else {
+        endpoint.waiting_tail = nullptr;
+    }
+
+    waiter->message_wait.previous = nullptr;
+    waiter->message_wait.next = nullptr;
+    waiter->message_wait.queued = false;
+    endpoint.waiting_count -= 1U;
+    return waiter;
+}
+
+/*
+ * Writes a receive result into a task's saved return registers. For a woken
+ * (not current) receiver this must complete before add_task publishes it
+ * READY; for the immediate path the caller is the current task.
+ */
+void EndpointManager::write_recv_registers(task::Task& receiver, intptr_t a0,
+                                           const Message& message) {
+    receiver.context.x[10] = static_cast<uintptr_t>(a0);
+    receiver.context.x[11] = message.words[0];
+    receiver.context.x[12] = message.words[1];
+    receiver.context.x[13] = message.words[2];
+    receiver.context.x[14] = message.words[3];
+    receiver.context.x[15] = static_cast<uintptr_t>(message.sender);
+}
 
 EndpointManager::EndpointManager() : table_lock_(), slot_allocated_(), endpoints_() {
 }
@@ -42,6 +117,9 @@ intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
         endpoint.owner = owner;
         endpoint.head = 0U;
         endpoint.count = 0U;
+        endpoint.waiting_head = nullptr;
+        endpoint.waiting_tail = nullptr;
+        endpoint.waiting_count = 0U;
         clear_queue(endpoint);
 
         /*
@@ -61,7 +139,12 @@ intptr_t EndpointManager::create_endpoint(TaskId owner, uint64_t* handle_out) {
     return kErrorNoSpace;
 }
 
-intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
+intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle,
+                                           size_t* woken_receivers) {
+    if (woken_receivers != nullptr) {
+        *woken_receivers = 0U;
+    }
+
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
         return kErrorInvalidArgument;
@@ -99,21 +182,75 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
         endpoint.generation += 1U;
         slot_allocated_[parsed.index] = false;
     }
+
+    /*
+     * M00-08.03.02: wake every blocked receiver exactly once with -EIDRM.
+     * Each waiter is unlinked first, its return register a0 is written, and
+     * only then is it published READY. add_task cannot legitimately fail on
+     * an unlinked blocked task; failure is a broken kernel invariant and
+     * fails closed rather than masquerading as -EAGAIN. Old-handle operations
+     * after this point fail with -EINVAL through the generation check above.
+     */
+    size_t woken = 0U;
+    while (task::Task* receiver = waiter_pop(endpoint)) {
+        receiver->state_info = nullptr;
+        receiver->context.x[10] = static_cast<uintptr_t>(kErrorIdrm);
+        if (!receiver->cpu->scheduler->add_task(*receiver)) {
+            fail_closed();
+        }
+        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+        woken += 1U;
+    }
+
+    if (woken_receivers != nullptr) {
+        *woken_receivers = woken;
+    }
     return 0;
 }
 
-intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4]) {
+intptr_t EndpointManager::send(TaskId sender, uint64_t handle, const uint64_t (&words)[4],
+                               TaskId* woken_receiver) {
+    if (woken_receiver != nullptr) {
+        *woken_receiver = 0U;
+    }
+
     const EndpointHandle parsed = EndpointHandle::from_raw(handle);
     if (!handle_well_formed(parsed)) {
         return kErrorInvalidArgument;
     }
 
-    /* Single endpoint lock only: no table, task, or time locks here. */
+    /* Single endpoint lock only: no table or task-manager locks here. */
     Endpoint& endpoint = endpoints_[parsed.index];
     SpinlockGuard endpoint_guard(endpoint.lock);
 
     if (!endpoint.active || (endpoint.generation != parsed.generation)) {
         return kErrorInvalidArgument;
+    }
+
+    check_endpoint_invariant(endpoint);
+
+    if (endpoint.waiting_count > 0U) {
+        /*
+         * M00-08.03.02 wakeup protocol: consume exactly one waiter, never
+         * also the pending FIFO. Unlink first, then write the saved return
+         * registers, then publish READY — a receiving hart may run the woken
+         * task as soon as add_task succeeds, before this lock is released.
+         * No handoff, no forced sender yield. add_task failure here is a
+         * broken invariant and fails closed.
+         */
+        task::Task* receiver = waiter_pop(endpoint);
+        const Message message{sender, {words[0], words[1], words[2], words[3]}};
+        write_recv_registers(*receiver, 0, message);
+        receiver->state_info = nullptr;
+        if (!receiver->cpu->scheduler->add_task(*receiver)) {
+            fail_closed();
+        }
+        __atomic_sub_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+
+        if (woken_receiver != nullptr) {
+            *woken_receiver = receiver->tid;
+        }
+        return 0;
     }
 
     if (endpoint.count >= kEndpointQueueDepth) {
@@ -161,14 +298,78 @@ intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
     return 0;
 }
 
-#ifdef JIXIA_M00_08_03_01_PROBE
+RecvResult EndpointManager::recv(task::Task& caller, uint64_t handle) {
+    /*
+     * A task already queued in a waiting FIFO cannot issue a syscall; reaching
+     * this check with it set means kernel state corruption.
+     */
+    if (caller.message_wait.queued) {
+        fail_closed();
+    }
+
+    const EndpointHandle parsed = EndpointHandle::from_raw(handle);
+    if (!handle_well_formed(parsed)) {
+        /* Rejected paths write the caller's a0 directly: it is still current. */
+        caller.context.x[10] = static_cast<uintptr_t>(kErrorInvalidArgument);
+        return RecvResult{RecvStatus::rejected, {}, kErrorInvalidArgument};
+    }
+
+    /* Single endpoint lock only: no table or task-manager locks here. */
+    Endpoint& endpoint = endpoints_[parsed.index];
+    SpinlockGuard endpoint_guard(endpoint.lock);
+
+    if (!endpoint.active || (endpoint.generation != parsed.generation)) {
+        caller.context.x[10] = static_cast<uintptr_t>(kErrorInvalidArgument);
+        return RecvResult{RecvStatus::rejected, {}, kErrorInvalidArgument};
+    }
+
+    check_endpoint_invariant(endpoint);
+
+    if (endpoint.count > 0U) {
+        /* No receiver can be waiting while a message is pending. */
+        Message message = endpoint.queue[endpoint.head];
+        endpoint.queue[endpoint.head] = {};
+        endpoint.head = (endpoint.head + 1U) % kEndpointQueueDepth;
+        endpoint.count -= 1U;
+        write_recv_registers(caller, 0, message);
+        return RecvResult{RecvStatus::delivered, message, 0};
+    }
+
+    /*
+     * M00-08.03.02 atomic blocking protocol, all under endpoint.lock:
+     * enqueue waiter -> blocked_message -> state_info -> set_next_runnable().
+     * The SpinlockGuard releases the lock only after this hart's current_task
+     * has been replaced, so a send or destroy on another hart can never see a
+     * half-blocked receiver and can never wake it before the block is durable.
+     */
+    waiter_push(endpoint, caller);
+    caller.state = task::TaskState::blocked_message;
+    caller.state_info = reinterpret_cast<void*>(handle);
+    __atomic_add_fetch(&g_blocked_receivers, 1U, __ATOMIC_RELEASE);
+    (void)caller.cpu->scheduler->set_next_runnable();
+
+    /*
+     * The old caller may already run (and even end) on another hart once the
+     * endpoint lock is released: no field of `caller` may be touched again.
+     */
+    return RecvResult{RecvStatus::blocked, {}, 0};
+}
+
+#ifdef JIXIA_M00_08_03_02_PROBE
+size_t EndpointManager::debug_blocked_receiver_count() {
+    return static_cast<size_t>(__atomic_load_n(&g_blocked_receivers, __ATOMIC_ACQUIRE));
+}
+#endif
+
+#if defined(JIXIA_M00_08_03_01_PROBE) || defined(JIXIA_M00_08_03_02_PROBE)
 namespace {
 
 /*
  * Probe-only snapshot of the mutable endpoint-table state: the allocator bit
- * plus per-slot active/retired/generation/owner/head/count and the full queue.
- * The per-slot Spinlock is deliberately excluded — a lock object is never
- * copied, assigned, or reset by the probe.
+ * plus per-slot active/retired/generation/owner/head/count, the waiting-FIFO
+ * links/count (M00-08.03.02), and the full queue. The per-slot Spinlock is
+ * deliberately excluded — a lock object is never copied, assigned, or reset
+ * by the probe.
  */
 struct ProbeEndpointState {
     bool active;
@@ -177,6 +378,9 @@ struct ProbeEndpointState {
     TaskId owner;
     size_t head;
     size_t count;
+    task::Task* waiting_head;
+    task::Task* waiting_tail;
+    size_t waiting_count;
     Message queue[EndpointManager::kEndpointQueueDepth];
 };
 
@@ -210,6 +414,9 @@ void EndpointManager::debug_probe_capture_state() {
         g_probe_table_before.endpoints[index].owner = endpoint.owner;
         g_probe_table_before.endpoints[index].head = endpoint.head;
         g_probe_table_before.endpoints[index].count = endpoint.count;
+        g_probe_table_before.endpoints[index].waiting_head = endpoint.waiting_head;
+        g_probe_table_before.endpoints[index].waiting_tail = endpoint.waiting_tail;
+        g_probe_table_before.endpoints[index].waiting_count = endpoint.waiting_count;
         for (size_t entry = 0U; entry < kEndpointQueueDepth; ++entry) {
             g_probe_table_before.endpoints[index].queue[entry] = endpoint.queue[entry];
         }
@@ -236,6 +443,9 @@ void EndpointManager::debug_probe_restore_state() {
         endpoint.owner = before.owner;
         endpoint.head = before.head;
         endpoint.count = before.count;
+        endpoint.waiting_head = before.waiting_head;
+        endpoint.waiting_tail = before.waiting_tail;
+        endpoint.waiting_count = before.waiting_count;
         for (size_t entry = 0U; entry < kEndpointQueueDepth; ++entry) {
             endpoint.queue[entry] = before.queue[entry];
         }

@@ -47,3 +47,41 @@
 
 /* In-range index 0 but generation 0x80000000: bit 63 set, never a legal handle. */
 #define JIXIA_M00_08_IPC_BIT63_HANDLE 0x8000000000000000
+
+/*
+ * M00-08.03.02 blocking-recv acceptance values. Child result values let the
+ * END path confirm each user assertion; payload words verify the full
+ * register ABI on the blocking wake path.
+ */
+#define JIXIA_M00_08_IPC_BLOCKING_INIT_RESULT 0x0804CAFE
+#define JIXIA_M00_08_IPC_BLOCKING_INIT_FAILURE 0x0804DEAD
+
+#define JIXIA_M00_08_IPC_C02_CHILD_RESULT 0x08040001
+#define JIXIA_M00_08_IPC_C05_R1_CHILD_RESULT 0x08040002
+#define JIXIA_M00_08_IPC_C05_R2_CHILD_RESULT 0x08040003
+#define JIXIA_M00_08_IPC_C12_CHILD_RESULT 0x08040004
+#define JIXIA_M00_08_IPC_C13A_CHILD_RESULT 0x08040005
+#define JIXIA_M00_08_IPC_C13A_HOG_CHILD_RESULT 0x08040006
+#define JIXIA_M00_08_IPC_C19_SENDER_CHILD_RESULT 0x08040007
+#define JIXIA_M00_08_IPC_C19_RECEIVER_CHILD_RESULT 0x08040008
+
+/* C02: four distinct words exercise the full a1..a4 wake ABI. */
+#define JIXIA_M00_08_IPC_WORD_C02_W0 0x08041001
+#define JIXIA_M00_08_IPC_WORD_C02_W1 0x08041002
+#define JIXIA_M00_08_IPC_WORD_C02_W2 0x08041003
+#define JIXIA_M00_08_IPC_WORD_C02_W3 0x08041004
+
+/* C05: distinct first words pair each message to its receiver; w1..w3 shared. */
+#define JIXIA_M00_08_IPC_WORD_C05_M1 0x08041011
+#define JIXIA_M00_08_IPC_WORD_C05_M2 0x08041012
+#define JIXIA_M00_08_IPC_WORD_C05_M3 0x08041013
+#define JIXIA_M00_08_IPC_WORD_C05_W1 0x08041014
+#define JIXIA_M00_08_IPC_WORD_C05_W2 0x08041015
+#define JIXIA_M00_08_IPC_WORD_C05_W3 0x08041016
+
+#define JIXIA_M00_08_IPC_WORD_C13A 0x08041021
+
+/* C19: word0 carries the round index; w1..w3 are fixed sentinels. */
+#define JIXIA_M00_08_IPC_WORD_C19_W1 0x08041031
+#define JIXIA_M00_08_IPC_WORD_C19_W2 0x08041032
+#define JIXIA_M00_08_IPC_WORD_C19_W3 0x08041033
