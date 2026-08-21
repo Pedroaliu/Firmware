@@ -208,6 +208,7 @@ def check_runqueues(records: list[Record]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--expected-harts", type=int)
     parser.add_argument("log", type=Path)
     args = parser.parse_args()
 
@@ -218,10 +219,18 @@ def main() -> int:
     check_ipc_fifo(records)
     check_runqueues(records)
 
-    harts = len({record.hart for record in records})
+    observed_harts = {record.hart for record in records}
+    if args.expected_harts is not None:
+        require(args.expected_harts > 0, "expected hart count must be positive")
+        require(
+            observed_harts == set(range(args.expected_harts)),
+            f"hart participation mismatch: expected={list(range(args.expected_harts))} "
+            f"observed={sorted(observed_harts)}",
+        )
+
     print(
         "JIXIA_VERIFY_TRACE_CHECK: PASS "
-        f"records={len(records)} harts={harts} first_seq={records[0].seq} "
+        f"records={len(records)} harts={len(observed_harts)} first_seq={records[0].seq} "
         f"last_seq={records[-1].seq}"
     )
     return 0

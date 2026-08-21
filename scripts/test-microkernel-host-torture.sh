@@ -9,9 +9,15 @@ readonly ROOT_DIR="$(
 readonly BUILD_DIR="${JIXIA_HOST_TORTURE_BUILD_DIR:-${ROOT_DIR}/build/host-torture}"
 readonly MESSAGES="${JIXIA_TORTURE_MESSAGES:-2000}"
 readonly SEED_TEXT="${JIXIA_TORTURE_SEEDS:-1 7 42}"
+readonly HOST_CXX="${JIXIA_HOST_CXX:-g++}"
+readonly TSAN_CXX="${JIXIA_HOST_TSAN_CXX:-${HOST_CXX}}"
 
-if ! command -v g++ >/dev/null 2>&1; then
-    echo "Missing command: g++" >&2
+if ! command -v "${HOST_CXX}" >/dev/null 2>&1; then
+    echo "Missing host C++ compiler: ${HOST_CXX}" >&2
+    exit 2
+fi
+if [[ "${JIXIA_HOST_TSAN:-0}" == "1" ]] && ! command -v "${TSAN_CXX}" >/dev/null 2>&1; then
+    echo "Missing TSan C++ compiler: ${TSAN_CXX}" >&2
     exit 2
 fi
 
@@ -26,14 +32,14 @@ readonly COMMON_FLAGS=(
     -I"${ROOT_DIR}"
 )
 
-g++ \
+"${HOST_CXX}" \
     "${COMMON_FLAGS[@]}" \
     -O2 \
     "${ROOT_DIR}/verification/host/ipc_torture.cpp" \
     "${ROOT_DIR}/microkernel/core/ipc_manager.cpp" \
     -o "${BUILD_DIR}/ipc_torture"
 
-g++ \
+"${HOST_CXX}" \
     "${COMMON_FLAGS[@]}" \
     -O1 \
     -g \
@@ -60,7 +66,7 @@ UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
     tee "${BUILD_DIR}/asan-seed-${seeds[0]}.log"
 
 if [[ "${JIXIA_HOST_TSAN:-0}" == "1" ]]; then
-    g++ \
+    "${TSAN_CXX}" \
         "${COMMON_FLAGS[@]}" \
         -O1 \
         -g \
@@ -70,9 +76,25 @@ if [[ "${JIXIA_HOST_TSAN:-0}" == "1" ]]; then
         "${ROOT_DIR}/microkernel/core/ipc_manager.cpp" \
         -o "${BUILD_DIR}/ipc_torture_tsan"
 
-    TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 \
-        "${BUILD_DIR}/ipc_torture_tsan" "${seeds[0]}" "${MESSAGES}" |
+    {
+        echo "compiler=${TSAN_CXX}"
+        "${TSAN_CXX}" --version | head -n 1
+        uname -a
+    } | tee "${BUILD_DIR}/tsan-environment.log"
+
+    set +e
+    TSAN_OPTIONS="${JIXIA_TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}" \
+        "${BUILD_DIR}/ipc_torture_tsan" "${seeds[0]}" "${MESSAGES}" 2>&1 |
         tee "${BUILD_DIR}/tsan-seed-${seeds[0]}.log"
+    readonly TSAN_STATUS=${PIPESTATUS[0]}
+    set -e
+    if [[ ${TSAN_STATUS} -ne 0 ]]; then
+        echo "HOST_IPC_TSAN: FAIL status=${TSAN_STATUS}" >&2
+        echo "diagnostics: ${BUILD_DIR}/tsan-environment.log" >&2
+        echo "diagnostics: ${BUILD_DIR}/tsan-seed-${seeds[0]}.log" >&2
+        exit "${TSAN_STATUS}"
+    fi
+    echo "HOST_IPC_TSAN: PASS compiler=${TSAN_CXX}"
 fi
 
 echo "Jixia host microkernel torture: PASS"

@@ -51,6 +51,10 @@ if [[ "${VERIFICATION_JITTER}" == "1" && "${VERIFICATION}" != "1" ]]; then
     echo "JIXIA_VERIFICATION_JITTER requires JIXIA_VERIFICATION=1" >&2
     exit 2
 fi
+if (( SMP_HARTS > 1 )) && [[ "${VERIFICATION}" != "1" ]]; then
+    echo "SMP acceptance requires JIXIA_VERIFICATION=1; concurrent printk is not a record-atomic oracle" >&2
+    exit 2
+fi
 if [[ "${VERIFICATION}" == "1" ]] && ! command -v python3 >/dev/null 2>&1; then
     echo "Missing command: python3" >&2
     exit 2
@@ -133,7 +137,13 @@ else
     : >"${LOG_FILE}"
 fi
 
-cat "${LOG_FILE}"
+if [[ "${VERIFICATION}" == "1" ]]; then
+    # Keep the machine-readable trace in LOG_FILE without flooding the terminal.
+    # The one-line checker result below is the user-facing verdict.
+    grep -v '^JIXIA_VERIFY_TRACE: ' "${LOG_FILE}" || true
+else
+    cat "${LOG_FILE}"
+fi
 
 if [[ ${QEMU_STATUS} -ne 124 ]]; then
     if [[ -s "${QEMU_ERROR_LOG}" ]]; then
@@ -154,7 +164,7 @@ do
     fi
 done
 
-for required_marker in \
+for boot_marker in \
     "M00_07_CONTAINED_MEMORY: PASS" \
     "SMP_FOUNDATION_TEST: PASS" \
     "SMP_POPULATION_TEST: PASS" \
@@ -164,6 +174,17 @@ for required_marker in \
     "MACHINE_TIMER_TEST: PASS" \
     "M00_08_HOSTBOOT_BOOTSTRAP: PASS" \
     "M00_08_TASK_DISPATCH: PASS" \
+    "M00_08_IPC_GENERATION_CEILING: PASS" \
+    "M00_08_IPC_SLOT_RETIREMENT: PASS"
+do
+    if ! grep -Fxq "${boot_marker}" "${LOG_FILE}"; then
+        echo "M00-08.03.01: boot marker not found: ${boot_marker}" >&2
+        exit 1
+    fi
+done
+
+if (( SMP_HARTS == 1 )); then
+    for required_marker in \
     "M00_08_TASK_CREATE: PASS" \
     "M00_08_TASK_YIELD: PASS" \
     "M00_08_CONTEXT_SWITCH: PASS" \
@@ -171,8 +192,6 @@ for required_marker in \
     "M00_08_TASK_WAIT_BLOCK: PASS" \
     "M00_08_TASK_DETACH: PASS" \
     "M00_08_IDLE_TASK: PASS" \
-    "M00_08_IPC_GENERATION_CEILING: PASS" \
-    "M00_08_IPC_SLOT_RETIREMENT: PASS" \
     "M00_08_IPC_ENDPOINT_CREATE: PASS" \
     "M00_08_IPC_C01_A_SENT: PASS" \
     "M00_08_IPC_C01_B_GOT: PASS" \
@@ -198,89 +217,105 @@ for required_marker in \
     "M00_08_IPC_RESERVED_ENOSYS: PASS" \
     "M00_08_IPC_ENDPOINT_ENOSPC: PASS" \
     "M00_08_IPC_NONBLOCKING: PASS"
-do
-    if ! grep -Fxq "${required_marker}" "${LOG_FILE}"; then
-        echo "M00-08.03.01: required marker not found: ${required_marker}" >&2
-        exit 1
-    fi
-done
-
-# Ordered-marker assertions: cross-case happened-before evidence.
-marker_line() {
-    grep -Fxn -- "${1}: PASS" "${LOG_FILE}" | head -n 1 | cut -d: -f1
-}
-
-check_marker_order() {
-    local previous="$1"
-    shift
-    for current in "$@"; do
-        local previous_line
-        local current_line
-        previous_line="$(marker_line "${previous}")"
-        current_line="$(marker_line "${current}")"
-        if [[ -z "${previous_line}" || -z "${current_line}" ]]; then
-            echo "M00-08.03.01: order evidence missing (${previous} / ${current})" >&2
+    do
+        if ! grep -Fxq "${required_marker}" "${LOG_FILE}"; then
+            echo "M00-08.03.01: required marker not found: ${required_marker}" >&2
             exit 1
         fi
-        if (( previous_line >= current_line )); then
-            echo "M00-08.03.01: marker order violated: ${previous} >= ${current}" >&2
-            exit 1
-        fi
-        previous="${current}"
     done
-}
+
+    # Ordered-marker assertions: single-hart cross-case happened-before evidence.
+    # Multi-hart runs use the structured history below: printk emits characters,
+    # not atomic records, so concurrent marker lines can legitimately interleave.
+    marker_line() {
+        grep -Fxn -- "${1}: PASS" "${LOG_FILE}" | head -n 1 | cut -d: -f1
+    }
+
+    check_marker_order() {
+        local previous="$1"
+        shift
+        for current in "$@"; do
+            local previous_line
+            local current_line
+            previous_line="$(marker_line "${previous}")"
+            current_line="$(marker_line "${current}")"
+            if [[ -z "${previous_line}" || -z "${current_line}" ]]; then
+                echo "M00-08.03.01: order evidence missing (${previous} / ${current})" >&2
+                exit 1
+            fi
+            if (( previous_line >= current_line )); then
+                echo "M00-08.03.01: marker order violated: ${previous} >= ${current}" >&2
+                exit 1
+            fi
+            previous="${current}"
+        done
+    }
 
 # C01: the send linearization point precedes the receive-side delivery, the
 # second-sender delivery (sender TaskId tracking), and the consumer's own
 # full-register assertion (send-before-recv persistence).
-check_marker_order \
-    "M00_08_IPC_C01_A_SENT" \
-    "M00_08_IPC_C01_B_GOT" \
-    "M00_08_IPC_C01_SENDER_TRACKED" \
-    "M00_08_IPC_C01_SEND_BEFORE_RECV"
+    check_marker_order \
+        "M00_08_IPC_C01_A_SENT" \
+        "M00_08_IPC_C01_B_GOT" \
+        "M00_08_IPC_C01_SENDER_TRACKED" \
+        "M00_08_IPC_C01_SEND_BEFORE_RECV"
 
 # C03: FIFO pops surface in send order 1, 2, 3 before the child's summary.
-check_marker_order \
-    "M00_08_IPC_C03_GOT_1" \
-    "M00_08_IPC_C03_GOT_2" \
-    "M00_08_IPC_C03_GOT_3" \
-    "M00_08_IPC_C03_FIFO"
+    check_marker_order \
+        "M00_08_IPC_C03_GOT_1" \
+        "M00_08_IPC_C03_GOT_2" \
+        "M00_08_IPC_C03_GOT_3" \
+        "M00_08_IPC_C03_FIFO"
 
 # C16: queue-full rejection precedes the oldest-word drain and the recovery.
-check_marker_order \
-    "M00_08_IPC_C16_FULL" \
-    "M00_08_IPC_C16_POP_OLDEST" \
-    "M00_08_IPC_C16_RECOVER"
+    check_marker_order \
+        "M00_08_IPC_C16_FULL" \
+        "M00_08_IPC_C16_POP_OLDEST" \
+        "M00_08_IPC_C16_RECOVER"
 
 # C14b: destroy precedes every stale-handle rejection, which precedes the
 # recycled-generation recreate and the new-epoch delivery.
-check_marker_order \
-    "M00_08_IPC_ENDPOINT_DESTROY" \
-    "M00_08_IPC_C14_STALE" \
-    "M00_08_IPC_C14B_RECYCLED_GENERATION" \
-    "M00_08_IPC_C14B_ISOLATION"
+    check_marker_order \
+        "M00_08_IPC_ENDPOINT_DESTROY" \
+        "M00_08_IPC_C14_STALE" \
+        "M00_08_IPC_C14B_RECYCLED_GENERATION" \
+        "M00_08_IPC_C14B_ISOLATION"
 
 # C15 (research acceptance plan): the empty-queue -EAGAIN precedes the
 # interleaved send, which precedes the post-drain -EAGAIN. Every marker is
 # emitted after the syscall returned, so the chain is the never-blocks proof.
-check_marker_order \
-    "M00_08_IPC_C15_EMPTY_EAGAIN" \
-    "M00_08_IPC_C15_INTERLEAVED_SEND" \
-    "M00_08_IPC_C15_NONBLOCKING"
+    check_marker_order \
+        "M00_08_IPC_C15_EMPTY_EAGAIN" \
+        "M00_08_IPC_C15_INTERLEAVED_SEND" \
+        "M00_08_IPC_C15_NONBLOCKING"
 
 # Generation ceiling: the epoch-cap evidence precedes the slot-retirement
 # evidence (boot-time white-box probe on the boot hart).
-check_marker_order \
-    "M00_08_IPC_GENERATION_CEILING" \
-    "M00_08_IPC_SLOT_RETIREMENT"
+    check_marker_order \
+        "M00_08_IPC_GENERATION_CEILING" \
+        "M00_08_IPC_SLOT_RETIREMENT"
 
 # The endpoint must exist before the first send can succeed on it.
-check_marker_order \
-    "M00_08_IPC_ENDPOINT_CREATE" \
-    "M00_08_IPC_C01_A_SENT"
+    check_marker_order \
+        "M00_08_IPC_ENDPOINT_CREATE" \
+        "M00_08_IPC_C01_A_SENT"
+else
+    for trace_marker in \
+        "JIXIA_VERIFY_TRACE_BEGIN: " \
+        "JIXIA_VERIFY_TRACE_END: "
+    do
+        if ! grep -Fq "${trace_marker}" "${LOG_FILE}"; then
+            echo "M00-08.03.01: structured trace marker not found: ${trace_marker}" >&2
+            exit 1
+        fi
+    done
+    echo "M00-08.03.01: SMP legacy marker oracle skipped (concurrent printk records are not atomic)"
+fi
 
 if [[ "${VERIFICATION}" == "1" ]]; then
-    python3 "${ROOT_DIR}/scripts/check-microkernel-trace.py" "${LOG_FILE}"
+    python3 "${ROOT_DIR}/scripts/check-microkernel-trace.py" \
+        --expected-harts "${SMP_HARTS}" \
+        "${LOG_FILE}"
 fi
 
 echo "M00-08.03.01 non-blocking IPC: PASS"

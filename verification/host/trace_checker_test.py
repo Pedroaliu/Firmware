@@ -50,12 +50,17 @@ def render(records: list[str], dropped: int = 0) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_case(name: str, contents: str, should_pass: bool) -> None:
+def run_case(
+    name: str,
+    contents: str,
+    should_pass: bool,
+    extra_args: list[str] | None = None,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="jixia-trace-check-") as directory:
         path = Path(directory) / f"{name}.log"
         path.write_text(contents, encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, str(CHECKER), str(path)],
+            [sys.executable, str(CHECKER), *(extra_args or []), str(path)],
             check=False,
             capture_output=True,
             text=True,
@@ -78,7 +83,8 @@ def replace(records: list[str], index: int, old: str, new: str) -> list[str]:
 
 
 def main() -> int:
-    run_case("valid", render(VALID_RECORDS), True)
+    run_case("valid", render(VALID_RECORDS), True, ["--expected-harts", "2"])
+    run_case("hart-participation", render(VALID_RECORDS), False, ["--expected-harts", "3"])
     run_case("overflow", render(VALID_RECORDS, dropped=1), False)
 
     sequence_gap = replace(VALID_RECORDS, 5, "seq=6", "seq=60")
@@ -97,7 +103,7 @@ def main() -> int:
     duplicate_terminal[5] = duplicate_terminal[5].replace("op=5", "op=3", 1)
     run_case("duplicate-terminal", render(duplicate_terminal), False)
 
-    print("JIXIA_VERIFY_TRACE_CHECKER_SELFTEST: PASS cases=7 mutations=6")
+    print("JIXIA_VERIFY_TRACE_CHECKER_SELFTEST: PASS cases=8 mutations=7")
     return 0
 
 

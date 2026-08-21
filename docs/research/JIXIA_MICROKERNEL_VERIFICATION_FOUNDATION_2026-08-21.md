@@ -140,6 +140,14 @@ no longer imports the complete architecture-dependent task structure.
 
 The existing M00-08.03.01 QEMU acceptance entry accepts SMP count, TCG thread
 mode, seed, jitter and trace size. Verification mode runs the offline checker.
+Single-hart acceptance retains the complete exact-marker and marker-order
+oracle. Multi-hart verification does not use concurrent `printk` records as a
+history oracle: the current console emits characters without record-level
+serialization, so valid lines can interleave. SMP acceptance instead requires
+a complete, overflow-free structured trace, exact expected-hart participation
+and a passing independent history check. Making normal multi-writer console
+records atomic remains a separate product observability requirement.
+
 The nightly runner combines:
 
 - small-state models;
@@ -148,8 +156,21 @@ The nightly runner combines:
 - a rotating seed matrix and deterministic hook perturbations;
 - complete logs and a run manifest retained as artifacts.
 
-These target lanes are not yet claimed green until they execute with the
-project's RISC-V toolchain and QEMU environment.
+The first external execution on commit `2563f14` established a green
+single-hart target baseline and completed the 2-hart/4-hart IPC workloads with
+full structured traces and zero dropped records. The original SMP wrapper then
+misclassified both runs because concurrent console characters corrupted exact
+legacy marker lines before the trace checker ran. This is test-harness and
+console evidence, not an observed IPC-history violation; the traces must be
+rechecked by the corrected wrapper before the SMP lanes are labelled green.
+
+The same execution passed optimized and ASan/UBSan host torture, while the GCC
+TSan executable terminated with `SIGSEGV` before producing a TSan race report.
+That lane remains inconclusive rather than passed or classified as a kernel
+defect. The harness now records the compiler/platform, captures sanitizer
+stderr and preserves the failing status; `JIXIA_HOST_TSAN_CXX` permits a second
+runtime/compiler without weakening the mandatory lane. This is consistent
+with the existing M00-05 record of GCC TSan runtime failures on the Deepin host.
 
 ## 7. Test families to grow with every feature
 
