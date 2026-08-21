@@ -62,6 +62,32 @@ option(
     OFF
 )
 
+option(
+    JIXIA_VERIFICATION
+    "Compile verification-only trace and deterministic test-point hooks"
+    OFF
+)
+
+option(
+    JIXIA_VERIFICATION_JITTER
+    "Inject bounded deterministic delay at verification test points"
+    OFF
+)
+
+set(
+    JIXIA_VERIFICATION_SEED
+    "1"
+    CACHE STRING
+    "Unsigned deterministic verification seed"
+)
+
+set(
+    JIXIA_VERIFICATION_TRACE_RECORDS
+    "1024"
+    CACHE STRING
+    "Fixed trace records retained per hart in verification builds"
+)
+
 set(JIXIA_ARCH_FLAGS
     -march=rv64imac_zicsr_zifencei
     -mabi=lp64
@@ -264,6 +290,38 @@ if(JIXIA_M00_08_03_01_PROBE)
         PRIVATE
             JIXIA_M00_08_03_01_PROBE=1
     )
+endif()
+
+if(JIXIA_VERIFICATION)
+    if(NOT JIXIA_VERIFICATION_SEED MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "JIXIA_VERIFICATION_SEED must be an unsigned integer")
+    endif()
+    if(NOT JIXIA_VERIFICATION_TRACE_RECORDS MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR "JIXIA_VERIFICATION_TRACE_RECORDS must be a positive integer")
+    endif()
+
+    target_sources(
+        jixia.elf
+        PRIVATE
+            microkernel/verify/trace.cpp
+    )
+    target_compile_definitions(
+        jixia.elf
+        PRIVATE
+            JIXIA_VERIFICATION=1
+            JIXIA_VERIFICATION_SEED=${JIXIA_VERIFICATION_SEED}ULL
+            JIXIA_VERIFICATION_TRACE_RECORDS=${JIXIA_VERIFICATION_TRACE_RECORDS}U
+    )
+
+    if(JIXIA_VERIFICATION_JITTER)
+        target_compile_definitions(
+            jixia.elf
+            PRIVATE
+                JIXIA_VERIFICATION_JITTER=1
+        )
+    endif()
+elseif(JIXIA_VERIFICATION_JITTER)
+    message(FATAL_ERROR "JIXIA_VERIFICATION_JITTER requires JIXIA_VERIFICATION")
 endif()
 
 target_compile_options(

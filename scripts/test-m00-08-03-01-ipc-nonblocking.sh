@@ -8,6 +8,12 @@ readonly ROOT_DIR="$(
 )"
 readonly BUILD_PATH="${JIXIA_M00_08_03_01_BUILD_DIR:-${ROOT_DIR}/build/m00-08-03-01}"
 readonly TIMEOUT_SECONDS="${JIXIA_QEMU_TIMEOUT_SECONDS:-10}"
+readonly SMP_HARTS="${JIXIA_QEMU_SMP_HARTS:-1}"
+readonly VERIFICATION="${JIXIA_VERIFICATION:-0}"
+readonly VERIFICATION_JITTER="${JIXIA_VERIFICATION_JITTER:-0}"
+readonly VERIFICATION_SEED="${JIXIA_VERIFICATION_SEED:-1}"
+readonly VERIFICATION_TRACE_RECORDS="${JIXIA_VERIFICATION_TRACE_RECORDS:-1024}"
+readonly TCG_THREAD_MODE="${JIXIA_QEMU_TCG_THREAD:-default}"
 readonly SERIAL_LOG="${BUILD_PATH}/m00-08-03-01.serial.log"
 readonly LOG_FILE="${BUILD_PATH}/m00-08-03-01.log"
 readonly QEMU_ERROR_LOG="${BUILD_PATH}/m00-08-03-01.qemu.log"
@@ -28,6 +34,52 @@ do
     fi
 done
 
+if [[ ! "${SMP_HARTS}" =~ ^[1-4]$ ]]; then
+    echo "JIXIA_QEMU_SMP_HARTS must be in [1, 4]" >&2
+    exit 2
+fi
+if [[ ! "${VERIFICATION}" =~ ^[01]$ || ! "${VERIFICATION_JITTER}" =~ ^[01]$ ]]; then
+    echo "JIXIA_VERIFICATION and JIXIA_VERIFICATION_JITTER must be 0 or 1" >&2
+    exit 2
+fi
+if [[ ! "${VERIFICATION_SEED}" =~ ^[0-9]+$ ||
+      ! "${VERIFICATION_TRACE_RECORDS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "invalid verification seed or trace-record count" >&2
+    exit 2
+fi
+if [[ "${VERIFICATION_JITTER}" == "1" && "${VERIFICATION}" != "1" ]]; then
+    echo "JIXIA_VERIFICATION_JITTER requires JIXIA_VERIFICATION=1" >&2
+    exit 2
+fi
+if [[ "${VERIFICATION}" == "1" ]] && ! command -v python3 >/dev/null 2>&1; then
+    echo "Missing command: python3" >&2
+    exit 2
+fi
+if [[ "${TCG_THREAD_MODE}" != "default" && "${TCG_THREAD_MODE}" != "single" &&
+      "${TCG_THREAD_MODE}" != "multi" ]]; then
+    echo "JIXIA_QEMU_TCG_THREAD must be default, single, or multi" >&2
+    exit 2
+fi
+
+verification_cmake_args=()
+if [[ "${VERIFICATION}" == "1" ]]; then
+    verification_cmake_args+=(
+        -DJIXIA_VERIFICATION=ON
+        "-DJIXIA_VERIFICATION_SEED=${VERIFICATION_SEED}"
+        "-DJIXIA_VERIFICATION_TRACE_RECORDS=${VERIFICATION_TRACE_RECORDS}"
+    )
+    if [[ "${VERIFICATION_JITTER}" == "1" ]]; then
+        verification_cmake_args+=(-DJIXIA_VERIFICATION_JITTER=ON)
+    else
+        verification_cmake_args+=(-DJIXIA_VERIFICATION_JITTER=OFF)
+    fi
+else
+    verification_cmake_args+=(
+        -DJIXIA_VERIFICATION=OFF
+        -DJIXIA_VERIFICATION_JITTER=OFF
+    )
+fi
+
 cmake \
     -S "${ROOT_DIR}" \
     -B "${BUILD_PATH}" \
@@ -42,7 +94,8 @@ cmake \
     -DCMAKE_OBJCOPY=riscv64-unknown-elf-objcopy \
     -DCMAKE_OBJDUMP=riscv64-unknown-elf-objdump \
     -DCMAKE_READELF=riscv64-unknown-elf-readelf \
-    -DJIXIA_M00_08_03_01_PROBE=ON
+    -DJIXIA_M00_08_03_01_PROBE=ON \
+    "${verification_cmake_args[@]}"
 
 cmake --build "${BUILD_PATH}" --target jixia.elf
 
@@ -55,12 +108,17 @@ fi
 rm -f "${SERIAL_LOG}" "${LOG_FILE}" "${QEMU_ERROR_LOG}"
 
 set +e
+qemu_accel_args=()
+if [[ "${TCG_THREAD_MODE}" != "default" ]]; then
+    qemu_accel_args=(-accel "tcg,thread=${TCG_THREAD_MODE}")
+fi
 timeout --kill-after=1s "${TIMEOUT_SECONDS}s" \
     qemu-system-riscv64 \
+        "${qemu_accel_args[@]}" \
         -machine virt \
         -cpu rv64 \
         -m 128M \
-        -smp 1 \
+        -smp "${SMP_HARTS}" \
         -bios "${FIRMWARE}" \
         -display none \
         -serial "file:${SERIAL_LOG}" \
@@ -220,5 +278,9 @@ check_marker_order \
 check_marker_order \
     "M00_08_IPC_ENDPOINT_CREATE" \
     "M00_08_IPC_C01_A_SENT"
+
+if [[ "${VERIFICATION}" == "1" ]]; then
+    python3 "${ROOT_DIR}/scripts/check-microkernel-trace.py" "${LOG_FILE}"
+fi
 
 echo "M00-08.03.01 non-blocking IPC: PASS"
