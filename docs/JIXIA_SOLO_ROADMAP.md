@@ -11,13 +11,14 @@ This is the canonical execution plan for Jixia's current one-person development 
 
 **Current milestone:** M00-08.03 Message IPC Foundation — ACTIVE. M00-08.03.01
 (non-blocking Endpoint/Message IPC) is DONE (`9c617ec`, PR #29; CI run
-`32437093429`). Second increment M00-08.03.02 (blocking recv + FIFO wakeup) is
-implemented on `agent/m00-08-03-02-ipc-blocking-recv` with local acceptance
-PASS ×3 including the `--smp 2` cross-hart litmus; integration PR pending.
+`32437093429`). M00-08.03.02 (blocking recv + FIFO wakeup) is DONE (squash
+`ba27c4c1a520`, PR #30; CI run `32460452557`). M00-08.03.03 (call/reply +
+ReplyToken) is at ABI-candidate stage — design doc under review, no production
+code yet; the full task-exit IPC cleanup is split to M00-08.03.04.
 
-**Immediate next step:** review/merge the M00-08.03.02 PR (record the CI run
-ID), then design the next M00-08.03 increment (call/reply, ReplyToken,
-task-exit IPC cleanup) from the accepted research candidate.
+**Immediate next step:** review/accept the M00-08.03.03 ABI candidate
+(`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`), flip it FROZEN FOR
+IMPLEMENTATION, then implement the increment.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
@@ -26,7 +27,9 @@ Current implementation checkpoint: `docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDAT
 Active scheduler checkpoint: `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`.
 
 Active IPC checkpoints: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`,
-`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
+`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (both accepted), and the
+M00-08.03.03 candidate `docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`
+(CANDIDATE / FROZEN FOR REVIEW).
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
@@ -190,11 +193,16 @@ M00-06/M00-07 S-mode contexts remain mechanism tests only.
                  handles, send/try_recv; syscalls 6/7/8/11, 9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
-  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
-                 ipc_recv (9/12 stay -ENOSYS), atomic block/wake/destroy
+  .03.02 DONE    blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stayed -ENOSYS), atomic block/wake/destroy
                  protocols under ep.lock, -EIDRM destroy wake, smp1
                  deterministic + smp2 cross-hart acceptance PASS x3
-                 (* squash/CI evidence recorded at integration; PR pending)
+                 (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
+  .03.03 CAND    call/reply + ReplyToken ABI candidate (syscalls 9/12,
+                 self-locating 64-bit token, a6 token out on recv/try_recv,
+                 per-endpoint transaction table, fail-closed task-exit
+                 boundary); docs only — review pending
+  .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry / prebuilt component catalog
 08.06    NEXT    init_main bootstrap -> registry -> InitService

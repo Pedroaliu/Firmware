@@ -6,11 +6,11 @@
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE
 - **M00-08.02 integration:** `de4df0e` (PR #26); full RV64 QEMU regression CI run `32219284629` SUCCESS
-- **M00-08.03 status:** ACTIVE — M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE (`9c617ec`, PR #29; CI `32437093429`); increment M00-08.03.02 (blocking recv + FIFO wakeup) implemented on `agent/m00-08-03-02-ipc-blocking-recv`, local acceptance PASS ×3 incl. `--smp 2` cross-hart litmus; M00-08.01/08.02/08.03.01 regressions green — integration PR pending
+- **M00-08.03 status:** ACTIVE — M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE (`9c617ec`, PR #29; CI `32437093429`); M00-08.03.02 (blocking recv + FIFO wakeup) DONE (squash `ba27c4c1a520`, PR #30; CI `32460452557`); M00-08.03.03 (call/reply + ReplyToken) ABI candidate drafted — review pending
 - **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
 - **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
-- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE (M00-08.03.01 DONE; M00-08.03.02 implemented, PR pending)
-- **Immediate next step:** review/merge the M00-08.03.02 PR (record the CI run ID), then design the next M00-08.03 increment (call/reply, ReplyToken, task-exit IPC cleanup per the research candidate)
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE (M00-08.03.01/.03.02 DONE; M00-08.03.03 ABI candidate under review; full task-exit IPC cleanup split to M00-08.03.04)
+- **Immediate next step:** review the M00-08.03.03 call/reply + ReplyToken ABI candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`), flip it FROZEN FOR IMPLEMENTATION, then implement; task-exit IPC cleanup stays M00-08.03.04
 - **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
@@ -40,7 +40,7 @@
 | Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
 | M00-08.01 Hostboot-shaped Task Executive | DONE | `e930a24`; `scripts/test-m00-08-01-task-lifecycle.sh` | U task dispatch, task/tracker lifecycle, ready queues, idle, create/yield/end/wait/detach |
 | M00-08.02 Hostboot Scheduler Alignment | DONE | `de4df0e` (PR #26); CI run `32219284629`; `scripts/test-m00-08-02-preemptive-scheduler.sh` | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping |
-| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 DONE (`9c617ec`); M00-08.03.02 implemented: `scripts/test-m00-08-03-02-ipc-blocking-recv.sh` ×3 PASS (smp1 deterministic + smp2 cross-hart litmus); PR pending | 03.02 blocking recv + FIFO wakeup on branch `agent/m00-08-03-02-ipc-blocking-recv`; call/reply, ReplyToken, task-exit cleanup still open |
+| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 DONE (`9c617ec`); M00-08.03.02 DONE (squash `ba27c4c1a520`, PR #30, CI `32460452557`); M00-08.03.03 ABI candidate drafted (review pending) | 03.03 call/reply + ReplyToken under review; full task-exit IPC cleanup split to M00-08.03.04 |
 | Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
 | Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
 | Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering follows prerequisites |
@@ -235,12 +235,19 @@ Actual increment ledger:
                  index+generation handles, syscalls 6/7/8/11 (9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
-  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
-                 ipc_recv (9/12 stay -ENOSYS), per-task MessageWaitNode,
+  .03.02 DONE    blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stayed -ENOSYS), per-task MessageWaitNode,
                  per-endpoint waiting FIFO, atomic block under ep.lock,
                  send pops exactly one waiter, destroy wakes with -EIDRM,
                  C02/C05/C12/C13a + smp2 cross-hart C19 litmus PASS x3
-                 (* squash/CI evidence recorded at integration; PR pending)
+                 (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
+  .03.03 CAND    call/reply + ReplyToken ABI candidate: syscalls 9/12,
+                 self-locating 64-bit token (endpoint epoch + txn slot +
+                 txn generation), a6 token out on recv/try_recv (a5 keeps
+                 sender TaskId), per-endpoint 16-slot transaction table,
+                 reply_obligation_count fail-closed task-exit boundary;
+                 docs only — review pending
+  .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
@@ -376,6 +383,19 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-21 — M00-08.03.02 integration recorded; increment flipped DONE
+
+- PR #30 (`feat(ipc): add M00-08.03.02 blocking recv and FIFO wakeup`) merged to
+  `main` as squash `ba27c4c1a520ae817a1980c764c89581518a50fd` at
+  2026-08-21T08:12:57Z; branch CI run `32460452557` SUCCESS (patch scope and
+  hygiene, RV64 QEMU full regression, required regression gates) before merge.
+- Increment ledger flipped `.03.02 IMPL* -> .03.02 DONE`;
+  `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` status flipped FROZEN FOR
+  IMPLEMENTATION -> ACCEPTED.
+- M00-08.03 stays ACTIVE. Next: M00-08.03.03 call/reply + ReplyToken ABI
+  candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`, CANDIDATE /
+  FROZEN FOR REVIEW); full task-exit IPC cleanup is split to M00-08.03.04.
 
 ### 2026-08-21 — M00-08.03.02 blocking recv implemented; PR pending
 

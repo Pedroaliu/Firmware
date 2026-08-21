@@ -9,7 +9,7 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE (`de4df0e`, PR #26; CI run `32219284629`)
-- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE, M00-08.03.02 (blocking recv + FIFO wakeup) implemented with local acceptance PASS — integration PR pending
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; M00-08.03.01 (non-blocking Endpoint/Message IPC) and M00-08.03.02 (blocking recv + FIFO wakeup) DONE, M00-08.03.03 (call/reply + ReplyToken) at ABI-candidate stage — review pending
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
@@ -357,9 +357,10 @@ M00-07 intentionally does not finish a production DDR boot flow. Its DDR/mainsto
 
 M00-08 Boot Service Execution Foundation remains the active major milestone. M00-08.01 is accepted
 at `e930a24`; M00-08.02 is DONE at `de4df0e` (CI run `32219284629`); M00-08.03 is ACTIVE with its
-first increment M00-08.03.01 DONE at `9c617ec` (PR #29, CI run `32437093429`) and its second
-increment M00-08.03.02 (blocking recv + FIFO wakeup) implemented on
-`agent/m00-08-03-02-ipc-blocking-recv` — integration PR pending.
+first increment M00-08.03.01 DONE at `9c617ec` (PR #29, CI run `32437093429`), its
+second increment M00-08.03.02 (blocking recv + FIFO wakeup) DONE at squash
+`ba27c4c1a520` (PR #30, CI run `32460452557`), and its third increment
+M00-08.03.03 (call/reply + ReplyToken) at ABI-candidate stage.
 
 Actual increment ledger:
 
@@ -376,12 +377,17 @@ Actual increment ledger:
                  register ABI, syscalls 6/7/8/11 (9/10/12 reserved ->
                  -ENOSYS), local acceptance PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
-  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
-                 ipc_recv (9/12 stay -ENOSYS), per-task MessageWaitNode,
+  .03.02 DONE    blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stayed -ENOSYS), per-task MessageWaitNode,
                  per-endpoint waiting FIFO, atomic block/wake/destroy under
                  ep.lock, -EIDRM destroy wake; smp1 deterministic + smp2
                  cross-hart acceptance PASS x3
-                 (* squash/CI evidence recorded at integration; PR pending)
+                 (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
+  .03.03 CAND    call/reply + ReplyToken ABI candidate (syscalls 9/12,
+                 self-locating 64-bit token, a6 token out on recv/try_recv,
+                 per-endpoint transaction table, fail-closed task-exit
+                 boundary); docs only — review pending
+  .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
@@ -392,11 +398,17 @@ Accepted M00-08.03.01 ABI record: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.m
 (covers the research candidate's non-blocking leans; blocking IPC, ReplyToken,
 and task-exit cleanup remain open for later M00-08.03 increments).
 
-Frozen-for-implementation M00-08.03.02 ABI record:
+Accepted M00-08.03.02 ABI record:
 `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (blocking recv syscall 10,
 multi-receiver FIFO wakeup, -EIDRM destroy wake, atomic block/wake protocols;
-call/reply, ReplyToken, timeouts, cancel, capabilities, registry routing, and
-task-exit IPC cleanup remain out of scope).
+squash `ba27c4c1a520`, PR #30, CI run `32460452557`).
+
+M00-08.03.03 ABI candidate (CANDIDATE / FROZEN FOR REVIEW, design only):
+`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md` (call/reply syscalls 9/12,
+self-locating 64-bit ReplyToken, a6 token out on recv/try_recv with a5 keeping
+the sender TaskId, per-endpoint transaction table, fail-closed task-exit
+boundary; timeouts, cancel, capabilities, registry routing, and the full
+task-exit IPC cleanup — split to M00-08.03.04 — remain out of scope).
 
 M00-08.02 translated Hostboot's decrementer and delay-list policy to RISC-V `mtime`: save the
 interrupted U task, release expired sleepers, select local/global/idle work, restore the selected
