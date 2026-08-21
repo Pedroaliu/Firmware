@@ -1,7 +1,7 @@
 # Jixia Microkernel Verification Foundation
 
-**Status:** verification design candidate and executable test foundation; not a
-milestone closure record
+**Status:** executable verification foundation with external acceptance
+evidence complete; ready for PR review, but not a milestone closure record
 
 **Date:** 2026-08-21
 
@@ -178,19 +178,32 @@ M00-08.03.01 SMP structured-history verification is therefore green for these
 named seeds and schedules; this is bounded stress/history evidence, not a
 general proof of all interleavings or starvation freedom.
 
-The same execution passed optimized and ASan/UBSan host torture, while the GCC
-TSan executable terminated with `SIGSEGV` before producing a TSan race report.
-That lane remains inconclusive rather than passed or classified as a kernel
-defect. The harness now records the compiler/platform, captures sanitizer
-stderr and preserves the failing status; `JIXIA_HOST_TSAN_CXX` permits a second
-runtime/compiler without weakening the mandatory lane. This is consistent
-with the existing M00-05 record of GCC TSan runtime failures on the Deepin host.
-The captured Deepin result identified GCC 12.3.0 on Linux 6.18.34 and failed in
-TSan initialization with `unexpected memory mapping`, before the torture body
-executed. On Linux, the host harness now uses `setarch --addr-no-randomize` when
-the per-process personality operation is available. This changes only the
-sanitized child process, not the host-wide ASLR sysctls; it can be disabled with
-`JIXIA_TSAN_DISABLE_ASLR=0` or required with `JIXIA_TSAN_DISABLE_ASLR=1`.
+The first execution passed optimized and ASan/UBSan host torture, while the GCC
+TSan executable terminated before producing a TSan race report. The captured
+Deepin result identified GCC 12.3.0 on Linux 6.18.34 and failed in TSan
+initialization with `unexpected memory mapping`, before the torture body
+executed. That first result was therefore classified as an inconclusive runtime
+environment failure rather than a kernel defect or a sanitizer pass.
+
+Commit `25bcef4` made the Linux harness use
+`setarch --addr-no-randomize` when the per-process personality operation is
+available. This changes only the sanitized child process, not the host-wide
+ASLR sysctls; it can be disabled with `JIXIA_TSAN_DISABLE_ASLR=0` or required
+with `JIXIA_TSAN_DISABLE_ASLR=1`. The harness records the compiler/platform,
+ASLR mode and available VM layout sysctls, captures sanitizer stderr and
+preserves the failing status; `JIXIA_HOST_TSAN_CXX` permits a second
+runtime/compiler without weakening the mandatory lane.
+
+External rerun on the same Deepin host at `25bcef4` completed the optimized
+seed matrix (`1`, `7`, `42`, 1000 messages per producer), representative
+ASan/UBSan seed `1`, and TSan seed `1`. Every workload reported MPSC FIFO,
+MPMC exactly-once, destroy-race and generation-churn PASS; TSan executed the
+workload and ended with `HOST_IPC_TSAN: PASS`. The recorded environment was GCC
+12.3.0, Linux 6.18.34, `tsan_aslr_mode=disabled-for-child`,
+`vm.legacy_va_layout=0`, and host-wide `kernel.randomize_va_space=2`. Thus the
+host torture acceptance lane is green on the project developer's actual host
+without disabling global ASLR. This remains named-seed `STRESS_ONLY` evidence,
+not proof that all data races or interleavings are absent.
 
 ## 7. Test families to grow with every feature
 
