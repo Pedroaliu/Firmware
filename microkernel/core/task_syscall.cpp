@@ -544,7 +544,7 @@ bool try_handle(jixia::arch::riscv::TrapFrame& frame) {
          * another hart, so the old Task/Context must not be touched again on
          * that path. The endpoint layer writes a0..a5 into the caller's saved
          * registers itself on the delivered/rejected paths.
-        */
+         */
         const uint64_t handle = caller->context.x[10];
         const ipc::RecvResult result = ipc::EndpointManager::instance().recv(*caller, handle);
 

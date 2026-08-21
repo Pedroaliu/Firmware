@@ -242,7 +242,6 @@ intptr_t EndpointManager::destroy_endpoint(TaskId caller, uint64_t handle) {
                        endpoint.generation, endpoint.retired ? 1U : 0U,
                        verify::lock_endpoint_table | verify::lock_endpoint);
 
-
     /*
      * M00-08.03.02: wake every blocked receiver exactly once with -EIDRM.
      * Each waiter is unlinked first, its return register a0 is written, and
