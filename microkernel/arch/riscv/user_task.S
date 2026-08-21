@@ -266,7 +266,7 @@ jixia_user_sleep_task:
 /*
  * M00-08.03.01 non-blocking IPC acceptance:
  *
- *   endpoint create/destroy lifecycle with generation isolation (C15)
+ *   endpoint create/destroy lifecycle with generation isolation (C14b)
  *   send-before-recv persistence (C01), FIFO ordering (C03)
  *   malformed and stale handles fail closed with -EINVAL (C14)
  *   queue-full -EAGAIN and post-drain recovery (C16)

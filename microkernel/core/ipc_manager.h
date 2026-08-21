@@ -95,7 +95,10 @@ class EndpointManager final {
      * Probe-only white-box acceptance for the generation ceiling: drives one
      * scratch slot to kMaxGeneration, destroys it, and requires permanent
      * retirement (create must skip the slot; the epoch never wraps to 1; no
-     * published handle has bit 63 set). Restores pristine slot state so the
+     * published handle has bit 63 set). The probe is hermetic: on every exit
+     * path, pass or fail, every slot it touched returns to its pre-probe
+     * state — active, retired, generation, owner, head, count, queue, and
+     * slot_allocated_ (Spinlock objects are never reset or assigned) — so the
      * U-mode scenario still sees a full 16-slot table.
      */
     [[nodiscard]] static bool debug_probe_generation_ceiling();
@@ -121,6 +124,13 @@ class EndpointManager final {
     [[nodiscard]] static bool handle_well_formed(const EndpointHandle& handle);
 
     static void clear_queue(Endpoint& endpoint);
+
+#ifdef JIXIA_M00_08_03_01_PROBE
+    /* Probe-only: full-table snapshot, restore, and scenario body (see .cpp). */
+    static void debug_probe_capture_state();
+    static void debug_probe_restore_state();
+    [[nodiscard]] static bool debug_probe_ceiling_scenario();
+#endif
 
     /* Guards only slot allocation; endpoint fields are guarded by endpoint.lock. */
     Spinlock table_lock_;

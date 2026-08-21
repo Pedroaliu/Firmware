@@ -162,7 +162,87 @@ intptr_t EndpointManager::try_recv(uint64_t handle, Message* message_out) {
 }
 
 #ifdef JIXIA_M00_08_03_01_PROBE
-bool EndpointManager::debug_probe_generation_ceiling() {
+namespace {
+
+/*
+ * Probe-only snapshot of the mutable endpoint-table state: the allocator bit
+ * plus per-slot active/retired/generation/owner/head/count and the full queue.
+ * The per-slot Spinlock is deliberately excluded — a lock object is never
+ * copied, assigned, or reset by the probe.
+ */
+struct ProbeEndpointState {
+    bool active;
+    bool retired;
+    uint32_t generation;
+    TaskId owner;
+    size_t head;
+    size_t count;
+    Message queue[EndpointManager::kEndpointQueueDepth];
+};
+
+struct ProbeTableState {
+    bool slot_allocated[EndpointManager::kMaxEndpoints];
+    ProbeEndpointState endpoints[EndpointManager::kMaxEndpoints];
+};
+
+/*
+ * The full-table snapshot is ~10 KiB, too large for the boot stack. The probe
+ * runs exactly once on the boot hart before jixia_release_executive_harts(),
+ * so an uninitialized static needs no guard and cannot race.
+ */
+ProbeTableState g_probe_table_before;
+
+} // namespace
+
+void EndpointManager::debug_probe_capture_state() {
+    EndpointManager& manager = instance();
+
+    /* Lock order matches create/destroy: table lock -> one endpoint lock. */
+    SpinlockGuard table_guard(manager.table_lock_);
+    for (size_t index = 0U; index < kMaxEndpoints; ++index) {
+        Endpoint& endpoint = manager.endpoints_[index];
+        SpinlockGuard endpoint_guard(endpoint.lock);
+
+        g_probe_table_before.slot_allocated[index] = manager.slot_allocated_[index];
+        g_probe_table_before.endpoints[index].active = endpoint.active;
+        g_probe_table_before.endpoints[index].retired = endpoint.retired;
+        g_probe_table_before.endpoints[index].generation = endpoint.generation;
+        g_probe_table_before.endpoints[index].owner = endpoint.owner;
+        g_probe_table_before.endpoints[index].head = endpoint.head;
+        g_probe_table_before.endpoints[index].count = endpoint.count;
+        for (size_t entry = 0U; entry < kEndpointQueueDepth; ++entry) {
+            g_probe_table_before.endpoints[index].queue[entry] = endpoint.queue[entry];
+        }
+    }
+}
+
+void EndpointManager::debug_probe_restore_state() {
+    EndpointManager& manager = instance();
+
+    /*
+     * Lock order matches create/destroy: table lock -> one endpoint lock.
+     * Only data fields are written back; the Spinlock objects are untouched.
+     */
+    SpinlockGuard table_guard(manager.table_lock_);
+    for (size_t index = 0U; index < kMaxEndpoints; ++index) {
+        Endpoint& endpoint = manager.endpoints_[index];
+        SpinlockGuard endpoint_guard(endpoint.lock);
+        const ProbeEndpointState& before = g_probe_table_before.endpoints[index];
+
+        manager.slot_allocated_[index] = g_probe_table_before.slot_allocated[index];
+        endpoint.active = before.active;
+        endpoint.retired = before.retired;
+        endpoint.generation = before.generation;
+        endpoint.owner = before.owner;
+        endpoint.head = before.head;
+        endpoint.count = before.count;
+        for (size_t entry = 0U; entry < kEndpointQueueDepth; ++entry) {
+            endpoint.queue[entry] = before.queue[entry];
+        }
+    }
+}
+
+bool EndpointManager::debug_probe_ceiling_scenario() {
     constexpr TaskId kProbeOwner = 1U;
 
     EndpointManager& manager = instance();
@@ -219,15 +299,25 @@ bool EndpointManager::debug_probe_generation_ceiling() {
         return false;
     }
 
-    /* Probe cleanup: restore pristine BSS-equivalent slot state. */
-    {
-        SpinlockGuard table_guard(manager.table_lock_);
-        SpinlockGuard endpoint_guard(manager.endpoints_[scratch.index].lock);
-        manager.endpoints_[scratch.index].generation = 0U;
-        manager.endpoints_[scratch.index].retired = false;
-        manager.slot_allocated_[scratch.index] = false;
-    }
     return true;
+}
+
+bool EndpointManager::debug_probe_generation_ceiling() {
+    /*
+     * Hermeticity contract: whatever the scenario does below — and however it
+     * exits, pass or fail — every slot the probe touched returns to its
+     * pre-probe state before the U-mode acceptance scenario runs. The ceiling
+     * and retirement evidence therefore cannot leak scratch or neighbor-slot
+     * state (e.g. residual generations) into the table U mode later sees.
+     */
+    debug_probe_capture_state();
+
+    const bool scenario_passed = debug_probe_ceiling_scenario();
+
+    /* Failure paths clean up too: no half-polluted slot state remains. */
+    debug_probe_restore_state();
+
+    return scenario_passed;
 }
 #endif
 
