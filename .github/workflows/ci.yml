@@ -203,6 +203,11 @@ jobs:
           JIXIA_QEMU_TIMEOUT_SECONDS=10 \
             bash scripts/test-m00-08-03-01-ipc-nonblocking.sh
 
+      - name: M00-08.03.02 blocking IPC
+        run: |
+          JIXIA_QEMU_TIMEOUT_SECONDS=15 \
+            bash scripts/test-m00-08-03-02-ipc-blocking-recv.sh
+
       - name: Upload firmware and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -228,6 +233,7 @@ jobs:
             build/m00-08-01/
             build/m00-08-02/
             build/m00-08-03-01/
+            build/m00-08-03-02/
 
   required:
     name: RV64 QEMU regression
