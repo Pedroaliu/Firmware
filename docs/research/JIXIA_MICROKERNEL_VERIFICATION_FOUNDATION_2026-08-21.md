@@ -148,6 +148,16 @@ a complete, overflow-free structured trace, exact expected-hart participation
 and a passing independent history check. Making normal multi-writer console
 records atomic remains a separate product observability requirement.
 
+Inspection after the first SMP run confirmed that this requirement is not
+merely cosmetic: `kernel_console::put()` concurrently updates the plain
+`write_position`, `kernel_log_buffer` and `was_truncated` state, while UART
+output is emitted one character at a time. This is an open product-side data
+race as well as a record-framing defect. The verification wrapper avoids using
+that racy stream as its SMP history oracle, but does not claim to fix or excuse
+the console. A production fix must define interrupt/preemption recursion and
+panic behavior; wrapping `printk` in an ordinary spinlock can self-deadlock if
+an interrupt or trap prints while the interrupted hart owns that lock.
+
 The nightly runner combines:
 
 - small-state models;
