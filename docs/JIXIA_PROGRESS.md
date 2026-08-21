@@ -2,15 +2,15 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-20
+- **Last updated:** 2026-08-21
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE
 - **M00-08.02 integration:** `de4df0e` (PR #26); full RV64 QEMU regression CI run `32219284629` SUCCESS
-- **M00-08.03 status:** ACTIVE — increment M00-08.03.01 (non-blocking Endpoint/Message IPC) implemented; local acceptance PASS ×3 (deterministic); M00-08.01/08.02 regressions green — integration PR pending
+- **M00-08.03 status:** ACTIVE — M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE (`9c617ec`, PR #29; CI `32437093429`); increment M00-08.03.02 (blocking recv + FIFO wakeup) implemented on `agent/m00-08-03-02-ipc-blocking-recv`, local acceptance PASS ×3 incl. `--smp 2` cross-hart litmus; M00-08.01/08.02/08.03.01 regressions green — integration PR pending
 - **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
 - **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
-- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE (first increment M00-08.03.01 implemented, acceptance PASS)
-- **Immediate next step:** review/merge the M00-08.03.01 PR (record CI run ID), then design the next M00-08.03 increment (blocking recv / call-reply / ReplyToken per the research candidate)
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE (M00-08.03.01 DONE; M00-08.03.02 implemented, PR pending)
+- **Immediate next step:** review/merge the M00-08.03.02 PR (record the CI run ID), then design the next M00-08.03 increment (call/reply, ReplyToken, task-exit IPC cleanup per the research candidate)
 - **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
@@ -40,7 +40,7 @@
 | Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
 | M00-08.01 Hostboot-shaped Task Executive | DONE | `e930a24`; `scripts/test-m00-08-01-task-lifecycle.sh` | U task dispatch, task/tracker lifecycle, ready queues, idle, create/yield/end/wait/detach |
 | M00-08.02 Hostboot Scheduler Alignment | DONE | `de4df0e` (PR #26); CI run `32219284629`; `scripts/test-m00-08-02-preemptive-scheduler.sh` | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping |
-| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 implemented: `scripts/test-m00-08-03-01-ipc-nonblocking.sh` ×3 PASS; integration PR pending | 03.01 non-blocking Endpoint/Message IPC accepted locally; blocking/wakeup IPC, call/reply, task-exit cleanup still open |
+| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 DONE (`9c617ec`); M00-08.03.02 implemented: `scripts/test-m00-08-03-02-ipc-blocking-recv.sh` ×3 PASS (smp1 deterministic + smp2 cross-hart litmus); PR pending | 03.02 blocking recv + FIFO wakeup on branch `agent/m00-08-03-02-ipc-blocking-recv`; call/reply, ReplyToken, task-exit cleanup still open |
 | Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
 | Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
 | Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering follows prerequisites |
@@ -235,6 +235,12 @@ Actual increment ledger:
                  index+generation handles, syscalls 6/7/8/11 (9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
+  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stay -ENOSYS), per-task MessageWaitNode,
+                 per-endpoint waiting FIFO, atomic block under ep.lock,
+                 send pops exactly one waiter, destroy wakes with -EIDRM,
+                 C02/C05/C12/C13a + smp2 cross-hart C19 litmus PASS x3
+                 (* squash/CI evidence recorded at integration; PR pending)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
 08.06    NEXT    init_main -> registry -> InitService
@@ -370,6 +376,40 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-21 — M00-08.03.02 blocking recv implemented; PR pending
+
+- Implemented M00-08.03.02 on `agent/m00-08-03-02-ipc-blocking-recv`: syscall 10
+  moved from reserved to the blocking `ipc_recv` (9/12 stay `-ENOSYS`, count stays
+  13). Success returns `a0=0, a1..a4=payload, a5=sender TaskId`; malformed/stale
+  handles return `-EINVAL` immediately; destroy while blocked wakes with `-EIDRM`.
+- Data structures: independent per-task `MessageWaitNode` (never aliasing runqueue
+  links or `DelayNode`) and per-endpoint `waiting_head/waiting_tail/waiting_count`,
+  all statically allocated. The generation-ceiling probe snapshot/restore now
+  includes the waiting-FIFO state.
+- Atomic block under `endpoint.lock` (enqueue -> `blocked_message` -> `state_info`
+  -> `set_next_runnable`, lock released only after the CPU switch; the syscall
+  handler never touches the old caller after a `blocked` result). Send pops
+  exactly one waiter and publishes READY via `add_task` inside the lock (no
+  handoff); destroy wakes every blocked receiver with `-EIDRM`. Waiting receivers
+  and pending messages are never both non-empty (checked at every entry);
+  `add_task` failure fails closed.
+- Scheduler/TaskManager guards: `RunQueue::insert/remove`, `Scheduler::add_task`,
+  `set_current_task`, and `release_task_locked` refuse a task still in a waiting
+  FIFO — no early run, no silent UAF. Lock order extended one-way to
+  `table -> endpoint -> {runqueue, delay-queue}`; `printk` gained a per-call
+  spinlock for two-hart marker emission.
+- Acceptance: `scripts/test-m00-08-03-02-ipc-blocking-recv.sh` ×3 PASS — `--smp 1`
+  deterministic C02 (recv-before-send), C05 (two-receiver FIFO pairing + third
+  send pends), C12 (destroy `-EIDRM` + stale `-EINVAL`), C13a (timer preemption
+  while blocked), C19 drained + reserved `-ENOSYS`, ordered-marker chains, and
+  exactly-once wake accounting (`blocks == send_wakes + destroy_wakes`); `--smp 2`
+  C19 64-round stress with `-EAGAIN` retry proving both harts participate and at
+  least one task blocks on one hart and is woken from the other. M00-08.01,
+  M00-08.02, M00-08.03.01 regressions and the default no-probe build stay green.
+- ABI frozen in `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (FROZEN FOR
+  IMPLEMENTATION / PR pending). M00-08.03 stays ACTIVE: call/reply, ReplyToken,
+  task-exit IPC cleanup, capabilities, and registry routing remain open.
 
 ### 2026-08-21 — M00-08.03.01 integration recorded; increment flipped DONE
 
