@@ -13,13 +13,13 @@ This is the canonical execution plan for Jixia's current one-person development 
 (non-blocking Endpoint/Message IPC) is DONE (`9c617ec`, PR #29; CI run
 `32437093429`). M00-08.03.02 (blocking recv + FIFO wakeup) is DONE (squash
 `ba27c4c1a520`, PR #30; CI run `32460452557`). M00-08.03.03 (call/reply +
-ReplyToken) is at ABI-candidate stage — design doc under review (Revision 3:
-three review-fix rounds applied, latest 2026-08-22), no production code yet;
+ReplyToken) is at ABI-candidate stage — design doc under review (Revision 4:
+four review-fix rounds applied, latest 2026-08-22), no production code yet;
 the full task-exit IPC cleanup is split to M00-08.03.04.
 
-**Immediate next step:** third-round review of the M00-08.03.03 ABI candidate
-(`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`, Revision 3), flip it FROZEN
-FOR IMPLEMENTATION, then implement the increment.
+**Immediate next step:** fourth-round/architecture review of the M00-08.03.03
+ABI candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`,
+Revision 4), flip it FROZEN FOR IMPLEMENTATION, then implement the increment.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
@@ -199,12 +199,14 @@ M00-06/M00-07 S-mode contexts remain mechanism tests only.
                  protocols under ep.lock, -EIDRM destroy wake, smp1
                  deterministic + smp2 cross-hart acceptance PASS x3
                  (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
-  .03.03 CAND    call/reply + ReplyToken ABI candidate, Revision 3
+  .03.03 CAND    call/reply + ReplyToken ABI candidate, Revision 4
                  (syscalls 9/12, self-locating 64-bit token, a6 token out
                  on recv/try_recv, per-endpoint transaction table with
                  stable server_task binding, transaction RETIRED ceiling
                  state, current-task-only end_task, frozen state_info +
-                 obligation atomic contracts, C32/C33 acceptance);
+                 conditional checked obligation RMW contract (per-field
+                 preflight discipline, receiver-explicit try_recv delivery
+                 entry), C32/C33 acceptance);
                  docs only — review pending
   .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
@@ -284,8 +286,9 @@ refusals, and the dual-hart race determinism; accepted ABI record
 `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
 
 M00-08.03.03 (call/reply + ReplyToken) is drafted as ABI candidate (PR #32,
-Revision 3 — current-task-only `end_task`, frozen `state_info` and
-obligation atomic contracts, C32/C33 acceptance); task-exit IPC cleanup is
+Revision 4 — current-task-only `end_task`, frozen `state_info`, conditional
+checked obligation RMW + per-field preflight discipline, receiver-explicit
+delivery entry, C32/C33 acceptance); task-exit IPC cleanup is
 split to M00-08.03.04. Capability tables and
 registry routing remain open for later M00-08.03 increments — M00-08.03
 is not DONE.

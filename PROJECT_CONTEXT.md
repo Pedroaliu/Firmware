@@ -9,7 +9,7 @@
 - **Repository:** `Pedroaliu/Firmware`
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE (`de4df0e`, PR #26; CI run `32219284629`)
-- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; M00-08.03.01 (non-blocking Endpoint/Message IPC) and M00-08.03.02 (blocking recv + FIFO wakeup) DONE, M00-08.03.03 (call/reply + ReplyToken) at ABI-candidate stage — three review rounds of fixes applied (Revision 3, 2026-08-22), review still pending
+- **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE; M00-08.03.01 (non-blocking Endpoint/Message IPC) and M00-08.03.02 (blocking recv + FIFO wakeup) DONE, M00-08.03.03 (call/reply + ReplyToken) at ABI-candidate stage — four review rounds of fixes applied (Revision 4, 2026-08-22), review still pending
 - **Project type:** RISC-V firmware-native server platform research project
 
 Jixia studies firmware, logical partitions, RAS, confidential computing, management-plane design, and full-system simulation as one co-designed platform. It is a learning and architecture project, not a short path to cloning EDK II, KVM, PowerVM, OpenSBI, or any single existing firmware stack.
