@@ -2,15 +2,15 @@
 
 ## Current snapshot
 
-- **Last updated:** 2026-08-21
+- **Last updated:** 2026-08-22
 - **Stable integration branch:** `main`
 - **Latest completed milestone:** `M00-08.02 Hostboot Scheduler Alignment` — DONE
 - **M00-08.02 integration:** `de4df0e` (PR #26); full RV64 QEMU regression CI run `32219284629` SUCCESS
-- **M00-08.03 status:** ACTIVE — M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE (`9c617ec`, PR #29; CI `32437093429`); M00-08.03.02 (blocking recv + FIFO wakeup) DONE (squash `ba27c4c1a520`, PR #30; CI `32460452557`); M00-08.03.03 (call/reply + ReplyToken) ABI candidate drafted — review pending
+- **M00-08.03 status:** ACTIVE — M00-08.03.01 (non-blocking Endpoint/Message IPC) DONE (`9c617ec`, PR #29; CI `32437093429`); M00-08.03.02 (blocking recv + FIFO wakeup) DONE (squash `ba27c4c1a520`, PR #30; CI `32460452557`); M00-08.03.03 (call/reply + ReplyToken) ABI candidate at Revision 3 — three review-fix rounds applied (2026-08-22), review pending
 - **Primary M00-07 acceptance evidence:** GitHub Actions run `32005255564` — full RV64 QEMU regression SUCCESS
 - **Architecture research gate:** Hostboot kernel/VFS/InitService/service-startup path — SUFFICIENTLY CLOSED FOR IMPLEMENTATION
 - **Current implementation milestone:** `M00-08.03 Message IPC Foundation` — ACTIVE (M00-08.03.01/.03.02 DONE; M00-08.03.03 ABI candidate under review; full task-exit IPC cleanup split to M00-08.03.04)
-- **Immediate next step:** review the M00-08.03.03 call/reply + ReplyToken ABI candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`), flip it FROZEN FOR IMPLEMENTATION, then implement; task-exit IPC cleanup stays M00-08.03.04
+- **Immediate next step:** third-round review of the M00-08.03.03 call/reply + ReplyToken ABI candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`, Revision 3), then flip it FROZEN FOR IMPLEMENTATION and implement; task-exit IPC cleanup stays M00-08.03.04
 - **Architecture checkpoint:** `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`
 
 ## Status legend
@@ -40,7 +40,7 @@
 | Hostboot service/InitService startup study | DONE | 2026-08-17 source study; Drive research record | kernel->root VFS->InitService; lower-privilege tasks; provider-backed faults |
 | M00-08.01 Hostboot-shaped Task Executive | DONE | `e930a24`; `scripts/test-m00-08-01-task-lifecycle.sh` | U task dispatch, task/tracker lifecycle, ready queues, idle, create/yield/end/wait/detach |
 | M00-08.02 Hostboot Scheduler Alignment | DONE | `de4df0e` (PR #26); CI run `32219284629`; `scripts/test-m00-08-02-preemptive-scheduler.sh` | mtime preemption, per-hart delay queue, deadline-aware idle, stack pre-mapping |
-| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 DONE (`9c617ec`); M00-08.03.02 DONE (squash `ba27c4c1a520`, PR #30, CI `32460452557`); M00-08.03.03 ABI candidate drafted (review pending) | 03.03 call/reply + ReplyToken under review; full task-exit IPC cleanup split to M00-08.03.04 |
+| M00-08.03 Message IPC Foundation | ACTIVE | M00-08.03.01 DONE (`9c617ec`); M00-08.03.02 DONE (squash `ba27c4c1a520`, PR #30, CI `32460452557`); M00-08.03.03 ABI candidate at Revision 3 (three review-fix rounds applied; review pending) | 03.03 call/reply + ReplyToken under review; full task-exit IPC cleanup split to M00-08.03.04 |
 | Provider-backed pageable component foundation | NEXT | architecture checkpoint | replace direct kernel FlashProvider fault path with blocking provider IPC |
 | Real InitService/ISTEP memory continuation | NEXT | roadmap | DDR/exit-contained returns after service/provider substrate exists |
 | Structured event and trace ABI | PLANNED | `docs/JIXIA_TRACE_OBSERVABILITY_VISION.md` | ordering follows prerequisites |
@@ -241,12 +241,15 @@ Actual increment ledger:
                  send pops exactly one waiter, destroy wakes with -EIDRM,
                  C02/C05/C12/C13a + smp2 cross-hart C19 litmus PASS x3
                  (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
-  .03.03 CAND    call/reply + ReplyToken ABI candidate: syscalls 9/12,
-                 self-locating 64-bit token (endpoint epoch + txn slot +
-                 txn generation), a6 token out on recv/try_recv (a5 keeps
-                 sender TaskId), per-endpoint 16-slot transaction table,
-                 reply_obligation_count fail-closed task-exit boundary;
-                 docs only — review pending
+  .03.03 CAND    call/reply + ReplyToken ABI candidate (Revision 3):
+                 syscalls 9/12, self-locating 64-bit token (endpoint
+                 epoch + txn slot + txn generation), a6 token out on
+                 recv/try_recv (a5 keeps sender TaskId), per-endpoint
+                 16-slot transaction table with stable server_task
+                 binding, transaction RETIRED ceiling state, current-
+                 task-only end_task + frozen state_info blocked-state
+                 contract + acquire-release obligation atomic contract,
+                 C32/C33 acceptance; docs only — review pending
   .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry
@@ -309,9 +312,11 @@ acceptance; accepted ABI record `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.m
 
 M00-08.03.03 (call/reply + ReplyToken) is at the ABI-candidate stage:
 `docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md` (CANDIDATE / FROZEN FOR
-REVIEW, PR #32) — 64-bit self-locating ReplyToken, per-endpoint 16-slot
-transaction table, single-endpoint-lock reply path, fail-closed task-exit
-boundary; full task-exit IPC cleanup is split to M00-08.03.04. Capability
+REVIEW, PR #32, Revision 3) — 64-bit self-locating ReplyToken, per-endpoint
+16-slot transaction table, single-endpoint-lock reply path, stable
+`server_task` binding, current-task-only `end_task`, frozen
+`state_info`/obligation atomic contracts, fail-closed task-exit boundary;
+full task-exit IPC cleanup is split to M00-08.03.04. Capability
 tables and registry routing remain open; M00-08.03 is not DONE.
 
 ---
@@ -390,6 +395,32 @@ Do not inflate Management Complex SRAM/software into a second Hostboot.
 ---
 
 ## Progress history
+
+### 2026-08-22 — M00-08.03.03 third review round applied (docs only)
+
+- Applied round 3 to the PR #32 ABI candidate
+  (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`, now Revision 3):
+  `end_task` frozen to current-task
+  only (`ending_current == false` fails closed at entry, before any state /
+  `current_task` / tracker / Task-slot mutation; the non-current teardown
+  UAF window is recorded and closed structurally — three atomic loads are no
+  longer claimed to support concurrent non-current teardown); the
+  `Task.state_info` blocked-state contract frozen (recv → `Endpoint*`, call →
+  `Transaction*` + `call_wait_token`; `state_info` is diagnostics only, never
+  a membership guard; frozen wake order writes registers → clears token →
+  clears `state_info` → `add_task`); the `reply_obligation_count` atomic
+  contract frozen (0-init, bound 256, acquire-release RMW, acquire loads at
+  end/release, checked increment/decrement, overflow/underflow/double
+  decrement fail closed); destroy-first staleness corrected to "endpoint
+  epoch mismatch **or** endpoint inactive/retired → `-EINVAL`"; C31 hermetic
+  probe contract strengthened (full snapshot/restore coverage, Spinlock never
+  copied/reset, static buffers, no-probe build carries no workload); C32
+  (cross-endpoint obligation atomicity) and C33 (task-end lifecycle guard,
+  probe must exercise the production entry judgment) added.
+- Docs only: no production code, `verification/`, host torture, trace
+  checker, nightly benchmark, or CI workflow change. Status stays
+  CANDIDATE / FROZEN FOR REVIEW; M00-08.03 stays ACTIVE; PR #32 stays
+  OPEN / DRAFT / unmerged. Next: ChatGPT third-round review.
 
 ### 2026-08-21 — M00-08.03.02 integration recorded; increment flipped DONE
 

@@ -11,6 +11,14 @@
   `end_task` preflight fail-closed semantics, the obligation/scheduling
   separation, explicit endpoint and transaction ceiling retirement (no wrap),
   and four added acceptance cases (§13).
+- **Revision 3 (2026-08-22):** third review round applied — `end_task`
+  restricted to the current task (the non-current-task teardown lifecycle race
+  is closed structurally, §7), the frozen `Task.state_info` blocked-state
+  contract (§3.1), the acquire-release atomic `reply_obligation_count` contract
+  with bounded counts and checked increment/decrement (§7), destroy-first
+  staleness wording corrected (endpoint epoch mismatch **or** endpoint
+  inactive/retired → `-EINVAL`, §5), the strengthened C31 hermetic probe
+  contract, and two more acceptance cases C32/C33 (§13).
 - **Builds on:** `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md` (accepted) and
   `docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (accepted: squash
   `ba27c4c1a520ae817a1980c764c89581518a50fd`, PR #30, CI run `32460452557`).
@@ -52,9 +60,19 @@
 8. **Direct-delivery publication order is frozen (§3):** binding and the
    obligation increment strictly precede READY publication (`add_task`); the
    woken receiver is never touched after `add_task`.
-9. **`end_task()` fails closed at entry** via an atomic preflight, before any
-   state, scheduler, or tracker mutation; `.03.03` promises no retry;
-   `release_task_locked()` stays as the second line of defense (§7).
+9. **`end_task()` ends only the current task (frozen).** At entry,
+   `TaskManager::end_task()` must verify the target is the calling hart's
+   `current_task`; `ending_current == false` fails closed **immediately** —
+   before any Task state mutation, before switching `current_task`, before any
+   tracker mutation, and before `release_task_locked()` frees the Task slot.
+   For the current task, an atomic residue preflight
+   (`message_wait.queued`, `call_wait_token`, `reply_obligation_count`) also
+   fails closed before the first teardown step; `.03.03` promises no retry;
+   `release_task_locked()` stays as the second line of defense (§7). The three
+   atomic loads are a residue check for the *current* task only — they are
+   **not** a concurrent non-current-task teardown guard (that race is closed
+   structurally by the current-task-only rule; §7). Non-current-task kill,
+   asynchronous crash cleanup, and recoverable exit are all M00-08.03.04.
 10. **`reply_obligation_count` never gates scheduling.** A server holding live
     tokens must remain fully schedulable — yield, preemption, requeue, and the
     eventual `ipc_reply` all keep working; the count is checked only at task
@@ -63,6 +81,22 @@
     .03.01 behavior: destroy at the ceiling permanently retires the slot; the
     epoch does not advance) and for transaction slots (a consumed/invalidated
     slot at `0xFFFFFF` goes `RETIRED` for the remainder of the endpoint epoch).
+12. **`Task.state_info` blocked-state contract frozen (§3.1):** a recv-blocked
+    task carries `state = blocked_message` with `state_info = Endpoint*`; a
+    call-blocked caller carries `state = blocked_message` with
+    `state_info = Transaction*` and `call_wait_token` = the ReplyToken.
+    `call_wait_token` is the scheduling/release membership guard;
+    `state_info` is kernel diagnostics and wait-object location only. Both
+    delivery paths (direct delivery and queued call) install the identical
+    caller blocked state, and every failure path leaves no `state_info`,
+    token, or transaction residue.
+13. **`reply_obligation_count` atomic contract frozen (§7):** initialized to 0
+    at task creation; theoretical maximum 256 (16 endpoints × 16 transaction
+    slots); increments/decrements are lock-free atomic RMWs with acquire-
+    release semantics; end/release checks are acquire loads; increment checks
+    the old value is below 256 and decrement checks the old value is above 0;
+    overflow, underflow, and double decrement all fail closed. The count gates
+    task end/release only — never scheduling, preemption, yield, or reply.
 
 ## 1. Syscall ABI (numbers and count unchanged)
 
@@ -87,7 +121,7 @@ TaskId at the ECALL):
 | Syscall | In | Out (success) | Errors |
 |---|---|---|---|
 | `ipc_call` (9) | `a0` = endpoint handle, `a1..a4` = request words 0..3 | `a0` = 0, `a1..a4` = reply words 0..3, `a5` = replier TaskId | `-EINVAL` (22) malformed/stale endpoint handle — immediate, never blocks; `-EAGAIN` (11) message FIFO full **or** transaction table exhausted — immediate, never blocks (no blocked-sender state is introduced); `-EIDRM` (43) endpoint destroyed while this caller was blocked |
-| `ipc_reply` (12) | `a0` = ReplyToken, `a1..a4` = reply words 0..3 | `a0` = 0 | `-EINVAL` (22) malformed token **or** stale token (endpoint epoch mismatch / retired slot / already consumed = duplicate); `-EACCES` (13) well-formed live token bound to a different server TaskId (probe only — does not consume) |
+| `ipc_reply` (12) | `a0` = ReplyToken, `a1..a4` = reply words 0..3 | `a0` = 0 | `-EINVAL` (22) malformed token **or** stale token (endpoint epoch mismatch / endpoint inactive or retired / retired transaction slot / already consumed = duplicate); `-EACCES` (13) well-formed live token bound to a different server TaskId (probe only — does not consume) |
 | `ipc_recv` (10) | `a0` = handle | `a0` = 0, `a1..a4` = payload words, `a5` = sender TaskId, **`a6` = ReplyToken (0 = plain send, nonzero = call request)** | unchanged from .03.02 (`-EINVAL`, `-EIDRM`) |
 | `ipc_try_recv` (11) | `a0` = handle | same shape as recv including `a6` | unchanged (`-EAGAIN` empty, `-EINVAL`) |
 
@@ -212,20 +246,22 @@ request[4]}` — static, guarded by the endpoint's existing lock. States: `FREE`
 | Transition | Trigger (all under endpoint lock) | Side effects |
 |---|---|---|
 | FREE → REQUEST_PENDING | `ipc_call`: no waiter, FIFO space, slot free | request enqueued in the shared FIFO carrying its token; transaction allocated |
-| FREE → DELIVERED_WAITING_REPLY | `ipc_call`: waiter present, slot free | **frozen order:** pop waiter → bind `server_task`/`server_tid` (= the waiter) → atomic `server_task->reply_obligation_count++` → write the waiter's `a0..a6` (`a0=0`, `a1..a4` request, `a5` caller TaskId, `a6` token) → complete the caller's block state (transaction state, `call_wait_token`, `blocked_message`) → `add_task(waiter)` → **never touch the waiter again** → switch the caller's hart `current_task` → release the endpoint lock (`.03.02` protocol) |
+| FREE → DELIVERED_WAITING_REPLY | `ipc_call`: waiter present, slot free | **frozen order:** pop waiter → bind `server_task`/`server_tid` (= the waiter) → atomic `server_task->reply_obligation_count++` → write the waiter's `a0..a6` (`a0=0`, `a1..a4` request, `a5` caller TaskId, `a6` token) → install the caller's frozen blocked state (transaction state, `blocked_message`, `call_wait_token`, `state_info` = `&Transaction` — §3.1) → `add_task(waiter)` → **never touch the waiter again** → switch the caller's hart `current_task` → release the endpoint lock (`.03.02` protocol) |
 | REQUEST_PENDING → DELIVERED_WAITING_REPLY | recv/try_recv pops the request | bind `server_task` (= the popping, currently running task) / `server_tid` → atomic `reply_obligation_count++` **before** the token is visible in the popper's return registers (same critical section; the popper is the running task, so no READY publication is involved) |
-| DELIVERED_WAITING_REPLY → ANSWERED → FREE | `ipc_reply` consume | reply words written into the caller's saved registers (`a0=0`, `a1..a4` reply, `a5` replier TaskId) **strictly before** READY, `call_wait_token` cleared, caller READY via `add_task`, no further caller access; slot `generation++` — or slot → `RETIRED` when the generation was `0xFFFFFF`; server's `reply_obligation_count--` via the stored `server_task` pointer (final decrement of this critical section — no dereference after) |
-| REQUEST_PENDING / DELIVERED_WAITING_REPLY → DEAD → FREE | endpoint destroy | caller woken with `a0 = -EIDRM` exactly once, `call_wait_token` cleared, caller READY; token invalidated; only delivered transactions have a server binding — their `server_task->reply_obligation_count--` is the final touch of that pointer in this critical section; slot `generation++` (or → `RETIRED` at the ceiling) |
+| DELIVERED_WAITING_REPLY → ANSWERED → FREE | `ipc_reply` consume | **frozen wake order (§3.1):** reply words written into the caller's saved registers (`a0=0`, `a1..a4` reply, `a5` replier TaskId) → `call_wait_token` cleared → `state_info` cleared → caller READY via `add_task` → **never touch the caller again**; slot `generation++` — or slot → `RETIRED` when the generation was `0xFFFFFF`; server's `reply_obligation_count--` via the stored `server_task` pointer (checked decrement, final decrement of this critical section — no dereference after) |
+| REQUEST_PENDING / DELIVERED_WAITING_REPLY → DEAD → FREE | endpoint destroy | **frozen wake order (§3.1):** caller's `a0 = -EIDRM` written exactly once → `call_wait_token` cleared → `state_info` cleared → caller READY via `add_task` → no further caller access; token invalidated; only delivered transactions have a server binding — their `server_task->reply_obligation_count--` is the final touch of that pointer in this critical section; slot `generation++` (or → `RETIRED` at the ceiling) |
 
 Invariants (kernel-enforced, fail closed):
 
 - every transaction in `REQUEST_PENDING` or `DELIVERED_WAITING_REPLY` has
   exactly one blocked caller: `TaskState::blocked_message` with
-  `Task.call_wait_token` == the token's raw value, and that Task is in no
-  runqueue and no endpoint waiting FIFO;
-- the reply payload is written into the caller's saved registers **strictly
-  before** the caller is published READY (both inside the reply critical
-  section);
+  `Task.call_wait_token` == the token's raw value and
+  `Task.state_info` == `&Transaction` (§3.1), and that Task is in no runqueue
+  and no endpoint waiting FIFO;
+- the reply payload is written into the caller's saved registers, then
+  `call_wait_token` and `state_info` are cleared, all **strictly before** the
+  caller is published READY (the frozen wake order of §3.1, inside the reply
+  critical section);
 - a transaction is consumed at most once (single generation-advancing
   transition under the lock);
 - a server's `reply_obligation_count` equals its count of live
@@ -239,6 +275,62 @@ Invariants (kernel-enforced, fail closed):
 - a `RETIRED` transaction slot is never allocated; `RETIRED` clears only when
   a fresh endpoint epoch reinitializes the table.
 
+### 3.1 Blocked-state contract (`state_info` / `call_wait_token`) — frozen
+
+`Task.state_info` is an existing field (it already names the object a blocked
+task waits on, mirroring Hostboot); `.03.03` freezes exactly how the two
+message-blocking waits use it. No new `TaskState` value exists (§0.3):
+
+```text
+recv-blocked (blocked in ipc_recv):
+    state      = blocked_message
+    state_info = Endpoint*
+
+call-blocked (blocked in ipc_call):
+    state           = blocked_message
+    state_info      = Transaction*
+    call_wait_token = ReplyToken (raw token value)
+```
+
+Role separation (frozen):
+
+- **`call_wait_token` is the scheduling/release membership guard.** The
+  scheduler and `TaskManager` refuse membership changes and task end/release
+  on `message_wait.queued` and `call_wait_token != 0` — and on nothing else
+  (§6.3).
+- **`state_info` is kernel diagnostics and wait-object location information
+  only.** It identifies which `Endpoint` or `Transaction` a blocked task is
+  waiting on (crash dumps, invariant checks, debugging); it is never read by
+  the scheduler, never used as a membership guard, and never dereferenced to
+  make a scheduling or task-lifetime decision.
+
+Wake order when a call is answered by `ipc_reply` or invalidated by endpoint
+destroy — the sequence inside the endpoint critical section must contain, in
+this order:
+
+```text
+write the caller's return registers
+→ clear call_wait_token
+→ clear state_info
+→ add_task(caller)
+→ never access the caller again
+```
+
+Consistency and residue rules (frozen):
+
+- the **direct-delivery** path (waiter present, §3) and the **queued-call**
+  path (request popped by recv/try_recv, §3) must install the **identical**
+  caller blocked state — `blocked_message` + `state_info = Transaction*` +
+  `call_wait_token` = token — so no kernel code ever needs to distinguish the
+  two paths when locating or waking a blocked caller;
+- no failure path may leave residue: if `ipc_call` fails, or a wake is
+  aborted, the caller's `state_info`, `call_wait_token`, and the transaction
+  record must all be back to their pre-call values (no dangling
+  `state_info`, no stale token, no half-allocated transaction) — this
+  composes with the residue-free allocation ordering of §4;
+- on every successful wake (reply or destroy), both fields are cleared before
+  READY publication per the frozen wake order above.
+
 ## 4. Relationship to the existing queues
 
 `ipc_call` reuses the send paths wholesale — no second queue exists:
@@ -246,8 +338,9 @@ Invariants (kernel-enforced, fail closed):
 - **Waiting receiver present:** send's fast path plus the frozen ordering
   additions of §3 — pop exactly one waiter, bind it as `server_task`/`server_tid`,
   atomic obligation++, write its return registers (`a5` = caller TaskId, `a6` =
-  token), complete the caller's block state, then `add_task` inside the lock and
-  never touch the waiter again. No handoff, no forced yield.
+  token), install the caller's frozen blocked state (§3.1 — identical to the
+  queued-call path's), then `add_task` inside the lock and never touch the
+  waiter again. No handoff, no forced yield.
 - **No waiter:** the request is enqueued in the **same depth-16 FIFO** as plain
   sends. `Message` gains a `uint64_t reply_token` field (`0` = plain). Plain
   sends and calls interleave in strict arrival order under the endpoint lock.
@@ -275,7 +368,8 @@ One critical section (`table_lock_` → endpoint lock), extending .03.02:
 2. wake every waiting receiver with `-EIDRM` (existing .03.02);
 3. **new:** transition every live transaction of this endpoint to DEAD — wake
    each blocked caller with `a0 = -EIDRM` **exactly once**, clear
-   `call_wait_token`, publish READY;
+   `call_wait_token`, clear `state_info` (the frozen wake order of §3.1),
+   publish READY;
 4. all unconsumed tokens of this endpoint are stale — by epoch mismatch for a
    recreated slot, or because a retired slot can never become `active` again
    (old endpoint handles keep their existing `-EINVAL` behavior);
@@ -292,7 +386,7 @@ endpoint lock; the first holder linearizes):
 | Order | reply observes | destroy observes | Result |
 |---|---|---|---|
 | reply first | live token → consumed, caller READY with the reply | no live transaction in its scan | caller keeps the reply; no `-EIDRM` wake |
-| destroy first | epoch mismatch → `-EINVAL` | live transactions → callers woken `-EIDRM` | caller gets `-EIDRM`; the reply fails stale |
+| destroy first | endpoint epoch mismatch, or endpoint inactive/retired (ceiling) → `-EINVAL` (unified stale verdict) | live transactions → callers woken `-EIDRM` | caller gets `-EIDRM`; the reply fails stale |
 
 Exactly one outcome per race: a caller can never receive both a reply and a
 destroy wake.
@@ -335,7 +429,9 @@ destroy wake.
   `TaskManager::set_current_task`) refuse — fail closed — exactly the two
   membership markers: `message_wait.queued` (recv waiter) and
   `call_wait_token != 0` (call-waiting caller, with
-  `TaskState::blocked_message`; not a new state value). **`reply_obligation_count`
+  `TaskState::blocked_message` and `state_info` = `Transaction*` per §3.1;
+  not a new state value). **`state_info` is never a membership guard** — it
+  is diagnostics/wait-object location only (§3.1) — and **`reply_obligation_count`
   is never a scheduling guard:** a server holding live tokens must remain fully
   schedulable — it yields, is preempted, requeues, and eventually replies;
   treating the count as a membership condition would deadlock the server
@@ -349,52 +445,138 @@ destroy wake.
 
 ## 7. Task-exit boundary (fail-closed only; full cleanup → M00-08.03.04)
 
+### 7.1 Blocked-state residue fields
+
 - `Task.call_wait_token` (u64, 0 = none): set under the endpoint lock when the
   caller blocks in `ipc_call`; cleared by reply or destroy under the same
-  endpoint lock **before** READY publication.
-- `Task.reply_obligation_count`: incremented when a task's recv/try_recv
-  delivers a call request (the task now holds a live ReplyToken); decremented
-  when that token dies — successful reply consume, or destroy invalidation.
-  **Synchronization:** mutations happen under an endpoint lock, but one server
-  may hold tokens from several endpoints, so two harts holding *different*
-  endpoint locks may mutate the same server's count concurrently — the field
-  must be a lock-free atomic RMW counter (kernel `amoadd`-class primitive),
-  never a plain unprotected integer. Release-side checks are atomic loads.
-- `TaskManager::end_task()` performs an **atomic preflight at entry**: atomic
-  loads of `message_wait.queued`, `call_wait_token`, and
-  `reply_obligation_count`; if any is nonzero it fails closed **before** the
-  first teardown step. This placement is mandatory: the existing `end_task()`
-  sequence is `state = ended` → switch this hart's `current_task` → mutate /
-  detach the tracker → `release_task_locked()`, so a check performed only at
-  release would fire after the task is already half-dismantled. Fail-closed
-  here is the standard kernel invariant discipline (the hart parks); `.03.03`
-  **does not promise a retryable exit** — a task exiting while it still waits
-  on calls or holds unconsumed tokens is a programming error under this ABI,
-  and the kernel refuses to tear it down.
+  endpoint lock, together with `state_info`, **before** READY publication (the
+  frozen wake order of §3.1).
+- `Task.state_info` follows the frozen blocked-state contract of §3.1:
+  `Endpoint*` while recv-blocked, `Transaction*` while call-blocked, cleared
+  on every wake before READY, never a scheduling or lifetime guard.
+
+### 7.2 `end_task()` — current task only (frozen)
+
+`TaskManager::end_task()` ends **only the current task**. Two entry checks,
+both fail closed **before any teardown step**:
+
+1. **Current-task check (first, immediate):** if the target is not the calling
+   hart's `current_task` (`ending_current == false`), fail closed at entry —
+   before modifying Task state, before switching `current_task`, before
+   mutating or detaching the tracker, and before `release_task_locked()`
+   could free the Task slot. `.03.03` provides **no** non-current-task exit
+   path: killing another task, asynchronous crash cleanup of another task,
+   and recoverable/retryable exit are all M00-08.03.04 (§7.4).
+2. **Residue preflight (current task):** atomic acquire loads of
+   `message_wait.queued`, `call_wait_token`, and `reply_obligation_count`; if
+   any is nonzero, fail closed before the first teardown step. This placement
+   is mandatory: the existing `end_task()` sequence is `state = ended` →
+   switch this hart's `current_task` → mutate / detach the tracker →
+   `release_task_locked()`, so a check performed only at release would fire
+   after the task is already half-dismantled. Fail-closed here is the standard
+   kernel invariant discipline (the hart parks); `.03.03` **does not promise a
+   retryable exit** — a task exiting while it still waits on calls or holds
+   unconsumed tokens is a programming error under this ABI, and the kernel
+   refuses to tear it down.
+
+**Why current-task-only is a structural closure, not a convenience.** The
+three preflight loads are a residue check for the current task; they are
+**not** sufficient to guard concurrent teardown of a *non-current* task, and
+this document does not claim otherwise. The closed window (recorded so no
+future round reintroduces it):
+
+```text
+server blocked in an endpoint's receiver waiting FIFO
+H1 (holds the endpoint lock, delivery in progress):
+    waiter_pop(server) — message_wait.queued becomes 0
+H2 (holds no endpoint lock): non-current end_task(server) loads
+    message_wait.queued    == 0
+    call_wait_token        == 0
+    reply_obligation_count == 0
+H2: proceeds — releases the Task slot
+H1: continues its critical section — binds server_task / obligation++ /
+    writes the waiter's return registers
+=> use-after-free on the released Task
+```
+
+H2's three loads are unsynchronized with H1's in-flight delivery critical
+section (H2 holds no lock that orders it against the endpoint lock), so
+"all three read zero" cannot mean "no delivery is in flight". The race is
+therefore closed structurally, by entry check 1: a task that is being
+delivered to (a waiting-FIFO member being popped, or a call-blocked caller
+being answered) is, by construction, blocked and descheduled — it is not the
+running `current_task` of any hart, so it cannot legally be the target of
+`end_task`. Conversely, once a woken server is actually scheduled and calls
+`end_task`, the delivery critical section has long completed, and the residue
+is visible to the preflight through the acquire-release chain: obligation
+increment (acquire-release RMW, §7.3) → READY publication (`add_task`,
+runqueue lock release) → schedule (runqueue lock acquire) → `end_task`
+preflight (acquire load). For the current task the preflight is therefore
+exact, not racy.
+
 - `release_task_locked()` keeps refusing on the same three conditions as the
   **second line of defense**, catching any path that could bypass the
-  `end_task()` preflight.
+  `end_task()` entry checks.
+- Race analysis (frozen, current task only): the preflight load may observe a
+  nonzero count that a concurrent destroy is about to clear → refusal, which
+  is always the safe answer. The reverse — observing 0 while a delivery to
+  this task is in flight — cannot happen for the current task: the increment
+  precedes the token becoming visible to the server (and the server's READY
+  publication) in the same delivery critical section (§3), and the server
+  cannot run `end_task` before it is scheduled. No re-attempt is guaranteed
+  or required.
+
+### 7.3 `reply_obligation_count` — atomic contract (frozen)
+
+`Task.reply_obligation_count` is incremented when a task's recv/try_recv
+delivers a call request (the task now holds a live ReplyToken) and decremented
+when that token dies — successful reply consume, or destroy invalidation.
+Mutations happen under an endpoint lock, but one server may hold tokens from
+several endpoints, so two harts holding *different* endpoint locks may mutate
+the same server's count concurrently. The frozen contract:
+
+- **Initialization:** `0` at task creation — the task-create path initializes
+  the field, and a recycled Task slot always restarts at 0.
+- **Bound:** the theoretical maximum is **256** — 16 endpoints × 16
+  transaction slots per endpoint; no valid kernel state exceeds it.
+- **Mutation primitive:** a lock-free atomic RMW (kernel `amoadd`-class
+  primitive) with **acquire-release semantics** — never a plain unprotected
+  integer, never a non-atomic load-modify-store pair.
+- **End/release checks:** acquire loads (the §7.2 preflight;
+  `release_task_locked`).
+- **Checked increment:** the increment must verify the returned old value is
+  `< 256`; an old value ≥ 256 (overflow) fails closed.
+- **Checked decrement:** the decrement must verify the returned old value is
+  `> 0`; an old value of 0 (underflow — a decrement without a matching
+  increment, i.e. a double decrement) fails closed.
+- **Fail-closed set:** overflow, underflow, and repeated/duplicate decrement
+  are all kernel invariant violations → fail closed.
+- **Scheduling neutrality (load-bearing, §6.3):** the count gates task
+  end/release exclusively. It must never prevent a server from being
+  scheduled, preempted, requeued, yielding, or executing `ipc_reply` — a
+  token-holding server that could not run could never reply, and the
+  obligation would never drain.
 - `reply_obligation_count > 0` is itself the lifetime guarantee for every
-  stored `server_task` pointer: while a transaction is live, the preflight
-  refuses the server's exit, so the Task object cannot be released; each
-  critical section that performs a final decrement (reply consume, destroy)
-  never dereferences the pointer afterwards (§2.2).
-- Race analysis (frozen): the preflight load may observe a nonzero count that
-  a concurrent destroy is about to clear → refusal, which is always the safe
-  answer. The reverse — observing 0 while a delivery is in flight — cannot
-  happen: the increment precedes the token becoming visible to the server
-  (and the server's READY publication) in the same delivery critical section
-  (§3). No re-attempt is guaranteed or required.
-- **Deliberately deferred to M00-08.03.04:** revoking outstanding tokens on
-  server exit, waking clients when their server dies, client cancellation,
-  timeouts, retryable/revocable exit, and any non-fail-closed cleanup path.
-  M00-08.03.03 ships only the constraints above.
+  stored `server_task` pointer: while a transaction is live, the §7.2 entry
+  checks refuse the server's exit, so the Task object cannot be released;
+  each critical section that performs a final decrement (reply consume,
+  destroy) never dereferences the pointer afterwards (§2.2).
+
+### 7.4 Deferred summary
+
+**Deliberately deferred to M00-08.03.04:** non-current-task kill,
+asynchronous crash cleanup of another task, recoverable/retryable exit,
+revoking outstanding tokens on server exit, waking clients when their server
+dies, client cancellation, timeouts, and any non-fail-closed cleanup path.
+M00-08.03.03 ships only the constraints above.
 
 ## 8. Explicitly out of scope
 
 Timeouts and cancellation; capability tables; service registry / name routing;
-provider / page-fault IPC; dynamic allocation; task kill / crash cleanup (the
-full task-exit IPC cleanup is M00-08.03.04); any benchmark or verification
+provider / page-fault IPC; dynamic allocation; task kill / asynchronous crash
+cleanup / recoverable exit — in particular every **non-current-task** exit
+path (`TaskManager::end_task()` ends only the current task, §7.2; the full
+task-exit IPC cleanup is M00-08.03.04); any benchmark or verification
 infrastructure change (`verification/`, host torture, trace checker, and the
 nightly benchmark are untouched by this increment).
 
@@ -403,7 +585,7 @@ nightly benchmark are untouched by this increment).
 | Condition | Value | Operations |
 |---|---|---|
 | malformed endpoint handle / malformed ReplyToken (tag or field range) | `-EINVAL` (22) | call, reply, recv, try_recv, send, destroy |
-| stale endpoint handle / stale or duplicate ReplyToken (epoch mismatch, retired slot, consumed) | `-EINVAL` (22) | call, reply |
+| stale endpoint handle / stale or duplicate ReplyToken (epoch mismatch, endpoint inactive/retired, retired slot, consumed) | `-EINVAL` (22) | call, reply |
 | wrong server (live token bound to another TaskId; probe only, no consume) | `-EACCES` (13) | reply |
 | endpoint destroyed while blocked (receiver or caller) | `-EIDRM` (43) | recv, call |
 | message FIFO full (send, call) / transaction table exhausted (call) / empty queue (try_recv) | `-EAGAIN` (11) | send, call, try_recv |
@@ -418,10 +600,11 @@ nightly benchmark are untouched by this increment).
 | FIFO message entry | endpoint | send / call enqueue | recv / try_recv pop | entries dropped with the epoch |
 | transaction slot + token | kernel (endpoint-scoped) | call (one critical section) | reply consume or destroy invalidation; consumed/invalidated slot goes `RETIRED` at the `0xFFFFFF` generation cap | all live transactions DEAD; callers woken `-EIDRM`; tokens stale |
 | transaction `server_task` pointer | kernel (transaction-scoped) | delivery bind (§3 frozen order) | reply consume / destroy: final atomic decrement, never dereferenced after | decremented for delivered transactions; pointer thereafter dead |
-| blocked caller Task | scheduler, via the transaction record | call block | reply / destroy wake (registers written before READY) | woken exactly once with `-EIDRM` |
-| user ReplyToken | receiving server | delivery (`a6`) | a single `ipc_reply` | invalid (epoch mismatch or retired slot); obligation decremented |
-| `reply_obligation_count` | server task | delivery increment | consume / destroy decrement | decremented for delivered transactions |
+| blocked caller Task | scheduler, via the transaction record | call block | reply / destroy wake (frozen wake order §3.1: registers → clear token → clear `state_info` → READY) | woken exactly once with `-EIDRM` |
+| user ReplyToken | receiving server | delivery (`a6`) | a single `ipc_reply` | invalid — endpoint epoch mismatch, or endpoint inactive/retired (ceiling); obligation decremented |
+| `reply_obligation_count` | server task | delivery increment (initialized 0 at task creation; bounded 256; acquire-release RMW, §7.3) | consume / destroy decrement (checked: old > 0) | decremented for delivered transactions |
 | `call_wait_token` | caller task | call block | reply / destroy (before READY) | cleared before READY |
+| `Task.state_info` | kernel (blocked-state diagnostics, §3.1) | call / recv block (`Transaction*` / `Endpoint*`) | wake: cleared before READY | cleared before READY |
 
 ## 11. Compatibility with .03.01 / .03.02
 
@@ -452,8 +635,8 @@ Design-only status: nothing below is written in this increment.
 |---|---|
 | `microkernel/arch/riscv/task_syscall_abi.h` | activate the 9/12 comments (numbers already frozen) |
 | `microkernel/core/ipc_manager.h/.cpp` | `Transaction` + per-endpoint `table[16]`; token encode/decode; `call`/`reply`; destroy extension; `Message.reply_token` |
-| `microkernel/core/task.h` | `call_wait_token`; atomic `reply_obligation_count` |
-| `microkernel/core/task_manager.cpp` | `end_task()` entry preflight + `release_task_locked` refusals; task-create initialization |
+| `microkernel/core/task.h` | `call_wait_token`; atomic `reply_obligation_count` (acquire-release RMW, §7.3); no new field for `state_info` — the existing field follows the §3.1 contract |
+| `microkernel/core/task_manager.cpp` | `end_task()` current-task-only entry refusal (`ending_current == false` → fail closed before any teardown) + residue preflight + `release_task_locked` refusals; task-create initialization (`reply_obligation_count = 0`, `call_wait_token = 0`, `state_info = nullptr`) |
 | `microkernel/core/scheduler.cpp` | membership guards extended to the call-wait marker |
 | `microkernel/core/task_syscall.cpp` | handlers for 9/12; recv/try_recv `a6` write |
 | `microkernel/arch/riscv/user_task.S`, `user_task_test_values.h` | acceptance workload (probe-gated) |
@@ -477,8 +660,41 @@ Design-only status: nothing below is written in this increment.
 | C29 direct-delivery ordering | `CALL_BIND_SERVER → OBLIGATION_INC → WAKE_READY` marker order inside the delivery critical section: binding and the obligation increment strictly precede READY publication; the woken server's obligation already covers its token when it first runs |
 | C30 transaction ABA | `OLD_TOKEN_EINVAL_NEW_TOKEN_OK` (slot reused by a later call: the previous generation's token → `-EINVAL`, the new token replies successfully) |
 | C31 transaction generation ceiling | `TXN_SLOT_RETIRED` — hermetic probe (mirroring the .03.01 ceiling probe) drives one slot's generation to `0xFFFFFF`: consume → `RETIRED`, never reallocated; subsequent calls succeed on other slots |
+| C32 cross-endpoint obligation atomicity | one server obtains one live ReplyToken from endpoint A and one from endpoint B (`OBLIGATION_EXACTLY_2`); two harts concurrently execute `reply(A)` and `destroy(B)`; final `reply_obligation_count` is exactly 0 (`OBLIGATION_EXACTLY_0`); both callers resume exactly once; no lost update, no underflow, no double wake (the §7.3 acquire-release RMW contract under cross-endpoint contention) |
+| C33 task-end lifecycle guard | a server holding a live token triggers task END: refusal fires **before any teardown** — Task state, `current_task`, tracker, and Task slot are all unmodified/unreused afterwards (asserted by post-refusal state comparison); the probe exercises the same entry judgment as production `end_task()` (see the C33 probe discipline below) |
 | obligations | `SERVER_OBLIGATION_ZERO` at scenario end |
 | summary | `M00_08_IPC_CALL_REPLY` |
 
 The .03.01/.03.02 scripts remain required regressions; no existing marker may
 change.
+
+**C31 hermetic probe contract (frozen).** The transaction-generation-ceiling
+probe is a white-box, strictly probe-gated kernel hook (mirroring the .03.01
+ceiling probe). It must be hermetic — the snapshot/restore coverage includes
+at least:
+
+- endpoint `active`, `retired`, `generation`, `owner`;
+- message FIFO head/count and every complete `Message`, including its
+  `reply_token`;
+- waiting-FIFO head/tail/count and node membership;
+- the full transaction table: `state`, `generation`, `caller`,
+  `server_task`, `server_tid`, `request[4]`;
+- the probe-involved Task state: `state`, `state_info`, `call_wait_token`,
+  `reply_obligation_count`, and return registers;
+- allocator/table slot status.
+
+Probe discipline (frozen): both success and failure paths restore the full
+snapshot before returning; `Spinlock` objects are never copied, assigned, or
+reset (the snapshot holds shadow copies of lock-guarded data taken while the
+lock is held); probe buffers are static — the probe must not consume boot
+stack space; the default no-probe build neither executes nor carries the test
+workload; benchmark and verification remain separate suites, and production
+keeps only the strictly probe-gated hook.
+
+**C33 probe discipline (frozen).** The real `end_task()` refusal parks the
+hart (fail-closed discipline), so the acceptance probe must either use a
+dedicated hart for the refusing END, or route through a probe-gated shared
+preflight helper that production `end_task()` itself calls for the same
+entry judgment. Testing a stand-in function unrelated to production
+`end_task()` is not acceptable — C33 must demonstrate that the production
+entry path refuses, not that a look-alike does.
