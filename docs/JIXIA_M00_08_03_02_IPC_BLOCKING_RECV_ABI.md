@@ -1,9 +1,9 @@
 # Jixia M00-08.03.02 — Frozen Blocking Receive IPC ABI
 
 - **Date:** 2026-08-21
-- **Status:** FROZEN FOR IMPLEMENTATION — implementation + local acceptance complete on
-  `agent/m00-08-03-02-ipc-blocking-recv`; **PR pending** (not merged; integration
-  evidence is recorded in the ledgers only after merge).
+- **Status:** ACCEPTED for increment M00-08.03.02 — merged to `main` as squash
+  `ba27c4c1a520ae817a1980c764c89581518a50fd` (PR #30, merged 2026-08-21T08:12:57Z;
+  branch CI run `32460452557` SUCCESS before merge).
 - **Builds on:** `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md` (accepted).
 - **Out of scope here:** `ipc_call`/`ipc_reply`, ReplyToken/Transact records, timeouts,
   cancellation, capability tables, service registry/name routing, and full external

@@ -4,20 +4,22 @@
 
 This is the canonical execution plan for Jixia's current one-person development mode.
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-22
 
 **Latest completed milestone:** M00-08.02 Hostboot Scheduler Alignment — DONE
 (`de4df0e`, PR #26; CI run `32219284629`)
 
 **Current milestone:** M00-08.03 Message IPC Foundation — ACTIVE. M00-08.03.01
 (non-blocking Endpoint/Message IPC) is DONE (`9c617ec`, PR #29; CI run
-`32437093429`). Second increment M00-08.03.02 (blocking recv + FIFO wakeup) is
-implemented on `agent/m00-08-03-02-ipc-blocking-recv` with local acceptance
-PASS ×3 including the `--smp 2` cross-hart litmus; integration PR pending.
+`32437093429`). M00-08.03.02 (blocking recv + FIFO wakeup) is DONE (squash
+`ba27c4c1a520`, PR #30; CI run `32460452557`). M00-08.03.03 (call/reply +
+ReplyToken) is at ABI-candidate stage — design doc under review (Revision 4:
+four review-fix rounds applied, latest 2026-08-22), no production code yet;
+the full task-exit IPC cleanup is split to M00-08.03.04.
 
-**Immediate next step:** review/merge the M00-08.03.02 PR (record the CI run
-ID), then design the next M00-08.03 increment (call/reply, ReplyToken,
-task-exit IPC cleanup) from the accepted research candidate.
+**Immediate next step:** fourth-round/architecture review of the M00-08.03.03
+ABI candidate (`docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`,
+Revision 4), flip it FROZEN FOR IMPLEMENTATION, then implement the increment.
 
 Architecture checkpoint: `docs/JIXIA_BOOT_SERVICE_NATIVE_SBI_ARCHITECTURE_2026-08-17.md`.
 
@@ -26,7 +28,9 @@ Current implementation checkpoint: `docs/JIXIA_M00_08_HOSTBOOT_EXECUTIVE_FOUNDAT
 Active scheduler checkpoint: `docs/JIXIA_M00_08_02_HOSTBOOT_SCHEDULER_ALIGNMENT.md`.
 
 Active IPC checkpoints: `docs/JIXIA_M00_08_03_01_IPC_NONBLOCKING_ABI.md`,
-`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
+`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md` (both accepted), and the
+M00-08.03.03 candidate `docs/JIXIA_M00_08_03_03_IPC_CALL_REPLY_ABI.md`
+(CANDIDATE / FROZEN FOR REVIEW).
 
 The goal is not maximum feature throughput. The goal is to understand, implement, test, and record each mechanism deeply enough that the architecture remains coherent and teachable.
 
@@ -190,11 +194,21 @@ M00-06/M00-07 S-mode contexts remain mechanism tests only.
                  handles, send/try_recv; syscalls 6/7/8/11, 9/10/12
                  reserved -> -ENOSYS); local acceptance x3 PASS
                  (squash 9c617ec, PR #29; CI 32437093429 SUCCESS)
-  .03.02 IMPL*   blocking recv + multi-receiver FIFO wakeup: syscall 10
-                 ipc_recv (9/12 stay -ENOSYS), atomic block/wake/destroy
+  .03.02 DONE    blocking recv + multi-receiver FIFO wakeup: syscall 10
+                 ipc_recv (9/12 stayed -ENOSYS), atomic block/wake/destroy
                  protocols under ep.lock, -EIDRM destroy wake, smp1
                  deterministic + smp2 cross-hart acceptance PASS x3
-                 (* squash/CI evidence recorded at integration; PR pending)
+                 (squash ba27c4c1a520, PR #30; CI 32460452557 SUCCESS)
+  .03.03 CAND    call/reply + ReplyToken ABI candidate, Revision 4
+                 (syscalls 9/12, self-locating 64-bit token, a6 token out
+                 on recv/try_recv, per-endpoint transaction table with
+                 stable server_task binding, transaction RETIRED ceiling
+                 state, current-task-only end_task, frozen state_info +
+                 conditional checked obligation RMW contract (per-field
+                 preflight discipline, receiver-explicit try_recv delivery
+                 entry), C32/C33 acceptance);
+                 docs only — review pending
+  .03.04 NEXT    full task-exit IPC cleanup (split from .03.03 by design)
 08.04    NEXT    safe user-copy/translation syscall boundary
 08.05    NEXT    resident Root Component Registry / prebuilt component catalog
 08.06    NEXT    init_main bootstrap -> registry -> InitService
@@ -245,7 +259,7 @@ and fixed idle-slice polling would fail). Pre-release stack pre-mapping holds co
 fixed-pool mapping loop precedes the hart release gate). Integrated to `main` as `de4df0e`
 (PR #26) with full RV64 QEMU regression CI run `32219284629` SUCCESS — milestone DONE.
 
-### M00-08.03 acceptance direction (first increment accepted locally)
+### M00-08.03 acceptance direction (two increments accepted; third in review)
 
 M00-08.03.01 froze the non-blocking subset of the research candidate
 (`docs/research/JIXIA_M00_08_03_IPC_ARCHITECTURE_CANDIDATE.md`); accepted ABI record:
@@ -261,13 +275,22 @@ destroy is owner-only (-EACCES) and clears messages + bumps generation
 recreate isolates epochs (old alias -EINVAL, new handle live at +1 epoch) [C14b]
 try_recv on an empty endpoint returns -EAGAIN immediately, never blocks [C15]
 queue-full is -EAGAIN at depth 16 and recovers after a drain
-reserved blocking syscalls (9/10/12) fail closed with -ENOSYS
 no blocking state, no scheduler interaction, no dynamic memory anywhere
 all M00-02 through M00-08.02 regressions remain green
 ```
 
-Blocking recv/call/reply, ReplyToken/Transact, task-exit IPC cleanup, capability
-tables, and registry routing remain open for later M00-08.03 increments — M00-08.03
+M00-08.03.02 (DONE, squash `ba27c4c1a520`, PR #30, CI `32460452557`) added
+blocking recv: syscall 10 with multi-receiver FIFO wakeup, atomic
+block-under-endpoint-lock protocol, `-EIDRM` destroy wakes, membership
+refusals, and the dual-hart race determinism; accepted ABI record
+`docs/JIXIA_M00_08_03_02_IPC_BLOCKING_RECV_ABI.md`.
+
+M00-08.03.03 (call/reply + ReplyToken) is drafted as ABI candidate (PR #32,
+Revision 4 — current-task-only `end_task`, frozen `state_info`, conditional
+checked obligation RMW + per-field preflight discipline, receiver-explicit
+delivery entry, C32/C33 acceptance); task-exit IPC cleanup is
+split to M00-08.03.04. Capability tables and
+registry routing remain open for later M00-08.03 increments — M00-08.03
 is not DONE.
 
 ## 7. NEXT — provider-backed pageable components
